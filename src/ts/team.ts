@@ -8,6 +8,8 @@
 import { notif } from './misc';
 import 'jquery-ui/ui/widgets/autocomplete';
 import 'bootstrap/js/src/modal.js';
+import 'bootstrap/dist/css/bootstrap.css';
+import '@fortawesome/fontawesome-svg-core/styles.css';
 import { Calendar } from '@fullcalendar/core';
 import bootstrapPlugin from '@fullcalendar/bootstrap';
 import caLocale from '@fullcalendar/core/locales/ca';
@@ -71,7 +73,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // SCHEDULER
   const calendar = new Calendar(calendarEl, {
     plugins: [ timeGridPlugin, interactionPlugin, listPlugin, bootstrapPlugin ],
-    header: {
+    headerToolbar: {
       left: 'prev,next today',
       center: 'title',
       right: 'timeGridWeek, listWeek',
@@ -82,16 +84,16 @@ document.addEventListener('DOMContentLoaded', function() {
     locales: [ caLocale, deLocale, enLocale, esLocale, frLocale, itLocale, idLocale, jaLocale, koLocale, nlLocale, plLocale, ptLocale, ptbrLocale, ruLocale, skLocale, slLocale, zhcnLocale ],
     // selected locale
     locale: $('#info').data('lang'),
-    defaultView: 'timeGridWeek',
+    initialView: 'timeGridWeek',
     // allow selection of range
     selectable: selectable,
     // draw an event while selecting
     selectMirror: true,
     editable: editable,
     // allow "more" link when too many events
-    eventLimit: true,
+    dayMaxEventRows: true,
     // set the date loaded
-    defaultDate: selectedDate,
+    initialDate: selectedDate,
     // load the events as JSON
     eventSources: [
       {
@@ -106,7 +108,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // remove possibility to book whole day, might add it later
     allDaySlot: false,
     // day start at 6 am
-    minTime: '06:00:00',
+    slotMinTime: '06:00:00',
     eventBackgroundColor: 'rgb(41,174,185)',
     // selection
     select: function(info): void {

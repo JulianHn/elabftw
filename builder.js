@@ -113,6 +113,11 @@ module.exports = {
   },
   module: {
     rules:[
+      // css loader
+      {
+        test: /\.css$/i,
+        use: ['css-loader'],
+      },
       // ts loader
       {
         test: /\.ts$/,
