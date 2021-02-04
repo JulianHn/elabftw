@@ -15,25 +15,18 @@ namespace Elabftw\Elabftw;
 use Defuse\Crypto\Key;
 use Elabftw\Exceptions\InvalidCsrfTokenException;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Session\Session;
+use Symfony\Component\HttpFoundation\Session\SessionInterface;
 
 /**
  * Prevent CSRF attacks
  */
 class Csrf
 {
-    /** @var Request $Request the request object */
-    private $Request;
+    private Request $Request;
 
-    /** @var Session $Session the session object */
-    private $Session;
+    private SessionInterface $Session;
 
-    /**
-     * Constructor
-     *
-     * @param Request $request
-     */
-    public function __construct(Request $request, Session $session)
+    public function __construct(Request $request, SessionInterface $session)
     {
         $this->Request = $request;
         $this->Session = $session;
@@ -44,8 +37,6 @@ class Csrf
 
     /**
      * Return the form key for inclusion in HTML
-     *
-     * @return string
      */
     public function getHiddenInput(): string
     {
@@ -54,8 +45,6 @@ class Csrf
 
     /**
      * Read token from session
-     *
-     * @return string
      */
     public function getToken(): string
     {
@@ -64,8 +53,6 @@ class Csrf
 
     /**
      * Validate the form key against the one previously set in Session
-     *
-     * @return void
      */
     public function validate(): void
     {
@@ -86,8 +73,6 @@ class Csrf
 
     /**
      * Generate a CSRF token
-     *
-     * @return string
      */
     private function generate(): string
     {
@@ -96,8 +81,6 @@ class Csrf
 
     /**
      * AJAX requests find the token in header
-     *
-     * @return bool
      */
     private function validateAjax(): bool
     {
@@ -106,8 +89,6 @@ class Csrf
 
     /**
      * Normal forms send the token with hidden field
-     *
-     * @return bool
      */
     private function validateForm(): bool
     {

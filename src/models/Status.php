@@ -11,9 +11,8 @@ declare(strict_types=1);
 namespace Elabftw\Models;
 
 use Elabftw\Elabftw\Db;
+use Elabftw\Elabftw\ParamsProcessor;
 use Elabftw\Exceptions\ImproperActionException;
-use Elabftw\Services\Check;
-use Elabftw\Services\Filter;
 use PDO;
 
 /**
@@ -21,47 +20,24 @@ use PDO;
  */
 class Status extends AbstractCategory
 {
-    /**
-     * Constructor
-     *
-     * @param Users $users
-     */
     public function __construct(Users $users)
     {
         $this->Users = $users;
         $this->Db = Db::getConnection();
     }
 
-    /**
-     * Create a new status
-     *
-     * @param string $name
-     * @param string $color #29AEB9
-     * @param int $isTimestampable
-     * @param int $default
-     * @param int|null $team
-     * @return int id of the new item
-     */
-    public function create(string $name, string $color, int $isTimestampable = 1, int $default = 0, ?int $team = null): int
+    public function create(ParamsProcessor $params, int $team = null): int
     {
         if ($team === null) {
             $team = $this->Users->userData['team'];
         }
-        $name = Filter::sanitize($name);
-        $color = Check::color($color);
-
-        if ($name === '') {
-            $name = 'Unnamed';
-        }
-
         $sql = 'INSERT INTO status(name, color, team, is_timestampable, is_default)
-            VALUES(:name, :color, :team, :is_timestampable, :is_default)';
+            VALUES(:name, :color, :team, :is_timestampable, 0)';
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':name', $name);
-        $req->bindParam(':color', $color);
+        $req->bindParam(':name', $params->name, PDO::PARAM_STR);
+        $req->bindParam(':color', $params->color, PDO::PARAM_STR);
         $req->bindParam(':team', $team, PDO::PARAM_INT);
-        $req->bindParam(':is_timestampable', $isTimestampable, PDO::PARAM_INT);
-        $req->bindParam(':is_default', $default, PDO::PARAM_INT);
+        $req->bindParam(':is_timestampable', $params->isTimestampable, PDO::PARAM_INT);
         $this->Db->execute($req);
 
         return $this->Db->lastInsertId();
@@ -71,14 +47,52 @@ class Status extends AbstractCategory
      * Create a default set of status for a new team
      *
      * @param int $team the new team id
-     * @return bool
      */
     public function createDefault(int $team): bool
     {
-        return $this->create('Running', '#29AEB9', 0, 1, $team) &&
-            $this->create('Success', '#54AA08', 1, 0, $team) &&
-            $this->create('Need to be redone', '#C0C0C0', 1, 0, $team) &&
-            $this->create('Fail', '#C24F3D', 1, 0, $team);
+        return $this->create(
+            new ParamsProcessor(
+                array(
+                    'name' => 'Running',
+                    'color' => '#29AEB9',
+                    'isTimestampable' => 0,
+                    'isDefault' => 1,
+                )
+            ),
+            $team
+        ) &&
+            $this->create(
+                new ParamsProcessor(array(
+                'name' => 'Success',
+                'color' => '#54AA08',
+                'isTimestampable' => 1,
+                'isDefault' => 0,
+                )),
+                $team
+            ) &&
+            $this->create(
+                new ParamsProcessor(array(
+                'name' => 'Need to be redone',
+                'color' => '#C0C0C0',
+                'isTimestampable' => 1,
+                'isDefault' => 0,
+                )),
+                $team
+            ) &&
+            $this->create(
+                new ParamsProcessor(array(
+                'name' => 'Fail',
+                'color' => '#C24F3D',
+                'isTimestampable' => 1,
+                'isDefault' => 0,
+                )),
+                $team
+            );
+    }
+
+    public function readAll(): array
+    {
+        return $this->read();
     }
 
     /**
@@ -86,7 +100,7 @@ class Status extends AbstractCategory
      *
      * @return array All status from the team
      */
-    public function readAll(): array
+    public function read(): array
     {
         $sql = 'SELECT status.id AS category_id,
             status.name AS category,
@@ -143,23 +157,12 @@ class Status extends AbstractCategory
 
     /**
      * Update a status
-     *
-     * @param int $id ID of the status
-     * @param string $name New name
-     * @param string $color New color
-     * @param int $isTimestampable May this status be timestamped
-     * @param int $isDefault
-     * @return void
      */
-    public function update(int $id, string $name, string $color, int $isTimestampable, int $isDefault): void
+    public function update(ParamsProcessor $params): string
     {
-        $name = Filter::sanitize($name);
-        $color = Check::color($color);
-
-        $default = 0;
-        if ($isDefault !== 0) {
+        // make sure there is only one default status
+        if ($params->isDefault === 1) {
             $this->setDefaultFalse();
-            $default = 1;
         }
 
         $sql = 'UPDATE status SET
@@ -170,22 +173,18 @@ class Status extends AbstractCategory
             WHERE id = :id AND team = :team';
 
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':name', $name);
-        $req->bindParam(':color', $color);
-        $req->bindParam(':is_timestampable', $isTimestampable);
-        $req->bindParam(':is_default', $default);
-        $req->bindParam(':id', $id);
-        $req->bindParam(':team', $this->Users->userData['team']);
+        $req->bindParam(':name', $params->name, PDO::PARAM_STR);
+        $req->bindParam(':color', $params->color, PDO::PARAM_STR);
+        $req->bindParam(':is_timestampable', $params->isTimestampable, PDO::PARAM_INT);
+        $req->bindParam(':is_default', $params->isDefault, PDO::PARAM_INT);
+        $req->bindParam(':id', $params->id, PDO::PARAM_INT);
+        $req->bindParam(':team', $this->Users->userData['team'], PDO::PARAM_INT);
         $this->Db->execute($req);
+
+        return $params->name;
     }
 
-    /**
-     * Destroy a status
-     *
-     * @param int $id id of the status
-     * @return void
-     */
-    public function destroy(int $id): void
+    public function destroy(int $id): bool
     {
         // don't allow deletion of a status with experiments
         if ($this->countItems($id) > 0) {
@@ -194,24 +193,13 @@ class Status extends AbstractCategory
 
         $sql = 'DELETE FROM status WHERE id = :id';
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':id', $id);
-        $this->Db->execute($req);
-    }
+        $req->bindParam(':id', $id, PDO::PARAM_INT);
 
-    /**
-     * Not implemented
-     *
-     * @return void
-     */
-    public function destroyAll(): void
-    {
+        return $this->Db->execute($req);
     }
 
     /**
      * Count all experiments with this status
-     *
-     * @param int $id
-     * @return int
      */
     protected function countItems(int $id): int
     {
@@ -227,8 +215,6 @@ class Status extends AbstractCategory
      * Remove all the default status for a team.
      * If we set true to is_default somewhere, it's best to remove all other default
      * in the team so we won't have two default status
-     *
-     * @return void
      */
     private function setDefaultFalse(): void
     {

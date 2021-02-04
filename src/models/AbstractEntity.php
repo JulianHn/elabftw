@@ -11,12 +11,15 @@ declare(strict_types=1);
 namespace Elabftw\Models;
 
 use Elabftw\Elabftw\Db;
+use Elabftw\Elabftw\DisplayParams;
 use Elabftw\Elabftw\Permissions;
 use Elabftw\Elabftw\Tools;
 use Elabftw\Exceptions\DatabaseErrorException;
 use Elabftw\Exceptions\IllegalActionException;
 use Elabftw\Exceptions\ImproperActionException;
 use Elabftw\Exceptions\ResourceNotFoundException;
+use Elabftw\Interfaces\CreatableInterface;
+use Elabftw\Maps\Team;
 use Elabftw\Services\Check;
 use Elabftw\Services\Email;
 use Elabftw\Services\Filter;
@@ -28,72 +31,51 @@ use PDO;
 /**
  * The mother class of Experiments and Database
  */
-abstract class AbstractEntity
+abstract class AbstractEntity implements CreatableInterface
 {
     use EntityTrait;
 
-    /** @var Comments $Comments instance of Comments */
-    public $Comments;
+    public Comments $Comments;
 
-    /** @var Links $Links instance of Links */
-    public $Links;
+    public Links $Links;
 
-    /** @var Steps $Steps instance of Steps */
-    public $Steps;
+    public Steps $Steps;
 
-    /** @var Tags $Tags instance of Tags */
-    public $Tags;
+    public Tags $Tags;
 
-    /** @var Uploads $Uploads instance of Uploads */
-    public $Uploads;
+    public Uploads $Uploads;
 
-    /** @var Users $Users our user */
-    public $Users;
+    public Users $Users;
 
-    /** @var string $type experiments or items */
-    public $type = '';
+    public Pins $Pins;
 
-    /** @var bool $bypassPermissions use that to ignore the canOrExplode calls */
-    public $bypassPermissions = false;
+    // experiments or items
+    public string $type = '';
 
-    /** @var string $page will be defined in children classes */
-    public $page = '';
+    // use that to ignore the canOrExplode calls
+    public bool $bypassPermissions = false;
 
-    /** @var array $filters an array of arrays with filters for sql query */
-    public $filters;
+    // will be defined in children classes
+    public string $page = '';
 
-    /** @var string $idFilter sql of ids to include */
-    public $idFilter;
+    // an array of arrays with filters for sql query
+    public array $filters = array();
 
-    /** @var string $titleFilter inserted in sql */
-    public $titleFilter = '';
+    // sql of ids to include
+    public string $idFilter = '';
 
-    /** @var string $dateFilter inserted in sql */
-    public $dateFilter = '';
+    // inserted in sql
+    public string $titleFilter = '';
 
-    /** @var string $bodyFilter inserted in sql */
-    public $bodyFilter = '';
+    // inserted in sql
+    public string $dateFilter = '';
 
-    /** @var string $queryFilter inserted in sql */
-    public $queryFilter = '';
+    // inserted in sql
+    public string $bodyFilter = '';
 
-    /** @var string $order inserted in sql */
-    public $order = 'date';
+    public bool $isReadOnly = false;
 
-    /** @var string $sort inserted in sql */
-    public $sort = 'DESC';
-
-    /** @var string $limit limit for sql */
-    public $limit = '';
-
-    /** @var string $offset offset for sql */
-    public $offset = '';
-
-    /** @var bool $isReadOnly if we can read but not write to it */
-    public $isReadOnly = false;
-
-    /** @var TeamGroups $TeamGroups instance of TeamGroups */
-    protected $TeamGroups;
+    protected TeamGroups $TeamGroups;
 
     /**
      * Constructor
@@ -112,8 +94,7 @@ abstract class AbstractEntity
         $this->Users = $users;
         $this->Comments = new Comments($this, new Email(new Config(), $this->Users));
         $this->TeamGroups = new TeamGroups($this->Users);
-        $this->filters = array();
-        $this->idFilter = '';
+        $this->Pins = new Pins($this);
 
         if ($id !== null) {
             $this->setId($id);
@@ -121,26 +102,11 @@ abstract class AbstractEntity
     }
 
     /**
-     * Create an empty entry
-     *
-     * @param int $tpl a template/category
-     * @return int the new id
-     */
-    abstract public function create(int $tpl): int;
-
-    /**
      * Duplicate an item
      *
      * @return int the new item id
      */
     abstract public function duplicate(): int;
-
-    /**
-     * Destroy an item
-     *
-     * @return void
-     */
-    abstract public function destroy(): void;
 
     /**
      * Lock/unlock
@@ -177,7 +143,7 @@ abstract class AbstractEntity
         }
 
         // check if the experiment is timestamped. Disallow unlock in this case.
-        if ($locked === 1 && $this->entityData['timestamped'] && $this instanceof Experiments) {
+        if ($locked === 1 && $this instanceof Experiments && $this->entityData['timestamped']) {
             throw new ImproperActionException(_('You cannot unlock or edit in any way a timestamped experiment.'));
         }
 
@@ -193,6 +159,7 @@ abstract class AbstractEntity
      * The goal here is to decrease the number of read columns to reduce memory footprint
      * The other read function is for view/edit modes where it's okay to fetch more as there is only one ID
      * Only logged in users use this function
+     * @param DisplayParams $displayParams display parameters like sort/limit/order by
      * @param bool $extended use it to get a full reply. used by API to get everything back
      *
      *                   \||/
@@ -209,7 +176,7 @@ abstract class AbstractEntity
      *
      *          Here be dragons!
      */
-    public function readShow(bool $extended = false): array
+    public function readShow(DisplayParams $displayParams, bool $extended = false): array
     {
         $sql = $this->getReadSqlBeforeWhere($extended, $extended);
         $teamgroupsOfUser = $this->TeamGroups->getGroupsFromUser();
@@ -220,8 +187,31 @@ abstract class AbstractEntity
         foreach ($this->filters as $filter) {
             $sql .= sprintf(" AND %s = '%s'", $filter['column'], $filter['value']);
         }
+
+        // experiments related to something?
+        if ($displayParams->searchType === 'related') {
+            $sql .= ' AND linkst.link_id = ' . $displayParams->related;
+        }
+
+        // needUseridBind is to toggle the bindParam
+        // with php8 it will throw an error if you try and bind to a non existing token
+        $needUseridBind = false;
+        // teamFilter is to restrict to the team for items only
+        // as they have a team column
+        $teamFilter = '';
+        if ($this instanceof Database) {
+            $teamFilter = ' AND users2teams.teams_id = entity.team';
+        }
         // add pub/org/team filter
-        $sql .= " AND ( entity.canread = 'public' OR entity.canread = 'organization' OR (entity.canread = 'team' AND users2teams.users_id = entity.userid) OR (entity.canread = 'user' AND entity.userid = :userid)";
+        $sql .= " AND ( entity.canread = 'public' OR entity.canread = 'organization' OR (entity.canread = 'team' AND users2teams.users_id = entity.userid" . $teamFilter . ") OR (entity.canread = 'user' ";
+        // admin will see the experiments with visibility user for user of their team
+        if ($this->Users->userData['is_admin']) {
+            $sql .= 'AND entity.userid = users2teams.users_id)';
+        } else {
+            // normal user will so only their own experiments
+            $needUseridBind = true;
+            $sql .= 'AND entity.userid = :userid)';
+        }
         // add all the teamgroups in which the user is
         if (!empty($teamgroupsOfUser)) {
             foreach ($teamgroupsOfUser as $teamgroup) {
@@ -234,21 +224,24 @@ abstract class AbstractEntity
             $this->titleFilter,
             $this->dateFilter,
             $this->bodyFilter,
-            $this->queryFilter,
+            Tools::getSearchSql($displayParams->query, 'and', '', $this->type),
             $this->idFilter,
             'GROUP BY id ORDER BY',
-            $this->order,
-            $this->sort,
+            $displayParams->getOrderSql(),
+            $displayParams->sort,
             ', entity.id',
-            $this->sort,
-            $this->limit,
-            $this->offset,
+            $displayParams->sort,
+            // add one so we can display Next page if there are more things to display
+            'LIMIT ' . (string) ($displayParams->limit + 1),
+            'OFFSET ' . (string) $displayParams->offset,
         );
 
         $sql .= implode(' ', $sqlArr);
 
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':userid', $this->Users->userData['userid'], PDO::PARAM_INT);
+        if ($needUseridBind === true) {
+            $req->bindParam(':userid', $this->Users->userData['userid'], PDO::PARAM_INT);
+        }
         $this->Db->execute($req);
 
         $itemsArr = $req->fetchAll();
@@ -294,7 +287,7 @@ abstract class AbstractEntity
     /**
      * Read the tags of the entity
      *
-     * @param array $items the results of all items from readShow()
+     * @param array<array-key, mixed> $items the results of all items from readShow()
      *
      * @return array
      */
@@ -359,54 +352,43 @@ abstract class AbstractEntity
         $req->bindParam(':title', $title);
         $req->bindParam(':date', $date);
         $req->bindParam(':body', $body);
-        /* disable this for now: we don't change the userid upon edition anymore
-            or the item might seemingly change team
-        if ($this instanceof Database) {
-            // if we are the admin doing an edit on a visibility = user item, we don't want to change the userid
-            // first get the visibility
-            $sql = 'SELECT userid, canread FROM items WHERE id = :id';
-            $req2 = $this->Db->prepare($sql);
-            $req2->bindParam(':id', $this->id, PDO::PARAM_INT);
-            if ($req2->execute() !== true) {
-                throw new DatabaseErrorException('Error while executing SQL query.');
-            }
-            $item = $req2->fetch();
-
-            $newUserid = $this->Users->userData['userid'];
-            if ($item['canread'] === 'user') {
-                $newUserid = $item['userid'];
-            }
-            $req->bindParam(':userid', $newUserid, PDO::PARAM_INT);
-        }
-         */
         $req->bindParam(':id', $this->id, PDO::PARAM_INT);
 
         $this->Db->execute($req);
     }
 
-    /**
-     * Set a limit for sql read. The limit is n times the wanted number of
-     * displayed results so we can remove the ones without read access
-     * and still display enough of them
-     *
-     * @param int $num number of items to ignore
-     * @return void
-     */
-    public function setLimit(int $num): void
+    public function updateTitle(string $title): void
     {
-        $num += 1;
-        $this->limit = 'LIMIT ' . (string) $num;
+        $this->canOrExplode('write');
+        // don't update if locked
+        if ($this->entityData['locked']) {
+            throw new ImproperActionException(_('Cannot update a locked entity!'));
+        }
+
+        $title = Filter::title($title);
+        $sql = 'UPDATE ' . $this->type . ' SET title = :title WHERE id = :id';
+        $req = $this->Db->prepare($sql);
+        $req->bindParam(':title', $title);
+        $req->bindParam(':id', $this->id, PDO::PARAM_INT);
+
+        $this->Db->execute($req);
     }
 
-    /**
-     * Add an offset to the displayed results
-     *
-     * @param int $num number of items to ignore
-     * @return void
-     */
-    public function setOffset(int $num): void
+    public function updateDate(string $date): void
     {
-        $this->offset = 'OFFSET ' . (string) $num;
+        $this->canOrExplode('write');
+        // don't update if locked
+        if ($this->entityData['locked']) {
+            throw new ImproperActionException(_('Cannot update a locked entity!'));
+        }
+
+        $date = Filter::kdate($date);
+        $sql = 'UPDATE ' . $this->type . ' SET date = :date WHERE id = :id';
+        $req = $this->Db->prepare($sql);
+        $req->bindParam(':date', $date);
+        $req->bindParam(':id', $this->id, PDO::PARAM_INT);
+
+        $this->Db->execute($req);
     }
 
     /**
@@ -421,9 +403,17 @@ abstract class AbstractEntity
         $this->canOrExplode('write');
         Check::visibility($value);
         Check::rw($rw);
+        // check if the permissions are enforced
+        $Team = new Team((int) $this->Users->userData['team']);
         if ($rw === 'read') {
+            if ($Team->getDoForceCanread() === 1) {
+                throw new ImproperActionException(_('Read permissions enforced by admin. Aborting change.'));
+            }
             $column = 'canread';
         } else {
+            if ($Team->getDoForceCanwrite() === 1) {
+                throw new ImproperActionException(_('Read permissions enforced by admin. Aborting change.'));
+            }
             $column = 'canwrite';
         }
 
@@ -439,14 +429,30 @@ abstract class AbstractEntity
      * Get a list of visibility/team groups to display
      *
      * @param string $rw read or write
-     * @return string
+     * @return string capitalized and translated permission level
      */
     public function getCan(string $rw): string
     {
         if (Check::id((int) $this->entityData['can' . $rw]) !== false) {
-            return $this->TeamGroups->readName((int) $this->entityData['can' . $rw]);
+            return ucfirst($this->TeamGroups->readName((int) $this->entityData['can' . $rw]));
         }
-        return ucfirst($this->entityData['can' . $rw]);
+        switch ($this->entityData['can' . $rw]) {
+            case 'public':
+                $res = _('Public');
+                break;
+            case 'organization':
+                $res = _('Organization');
+                break;
+            case 'team':
+                $res = _('Team');
+                break;
+            case 'user':
+                $res = _('User');
+                break;
+            default:
+                $res = Tools::error();
+        }
+        return ucfirst($res);
     }
 
     /**
@@ -474,7 +480,7 @@ abstract class AbstractEntity
      * Verify we can read/write an item
      * Here be dragons! Cognitive load > 9000
      *
-     * @param array|null $item one item array
+     * @param array<string, mixed>|null $item one item array
      * @return array
      */
     public function getPermissions(?array $item = null): array
@@ -504,60 +510,6 @@ abstract class AbstractEntity
         }
 
         return array('read' => false, 'write' => false);
-    }
-
-    /**
-     * Get an array formatted for the autocomplete input (link and bind)
-     *
-     * @param string $term the query
-     * @param string $source experiments or items
-     * @return array
-     */
-    public function getAutocomplete(string $term, string $source): array
-    {
-        if ($source === 'experiments') {
-            $items = $this->getExpList($term);
-        } elseif ($source === 'items') {
-            $items = $this->getDbList($term);
-        } else {
-            throw new \InvalidArgumentException;
-        }
-        $linksArr = array();
-        foreach ($items as $item) {
-            $linksArr[] = $item['id'] . ' - ' . $item['category'] . ' - ' . substr($item['title'], 0, 60);
-        }
-        return $linksArr;
-    }
-
-    /**
-     * Get an array of a mix of experiments and database items
-     * for use with the mention plugin of tinymce (# and $ autocomplete)
-     *
-     * @param string $term the query
-     * @return array
-     */
-    public function getMentionList(string $term): array
-    {
-        $mentionArr = array();
-
-        // add items from database
-        $itemsArr = $this->getDbList($term);
-        foreach ($itemsArr as $item) {
-            $mentionArr[] = array('name' => "<a href='database.php?mode=view&id=" .
-                $item['id'] . "'>[" . $item['category'] . '] ' . $item['title'] . '</a>',
-            );
-        }
-
-        // complete the list with experiments
-        // fix #191
-        $experimentsArr = $this->getExpList($term);
-        foreach ($experimentsArr as $item) {
-            $mentionArr[] = array('name' => "<a href='experiments.php?mode=view&id=" .
-                $item['id'] . "'>[" . ngettext('Experiment', 'Experiments', 1) . '] ' . $item['title'] . '</a>',
-            );
-        }
-
-        return $mentionArr;
     }
 
     /**
@@ -607,7 +559,7 @@ abstract class AbstractEntity
         if ($period === '') {
             $period = '15000101-30000101';
         }
-        list($from, $to) = explode('-', $period);
+        [$from, $to] = explode('-', $period);
         $sql = 'SELECT id FROM ' . $this->type . ' WHERE userid = :userid AND lastchange BETWEEN :from AND :to';
         $req = $this->Db->prepare($sql);
         $req->bindParam(':userid', $userid, PDO::PARAM_INT);
@@ -685,68 +637,15 @@ abstract class AbstractEntity
     }
 
     /**
-     * Add/remove current entity as pinned for current user
-     *
-     * @return void
-     */
-    public function togglePin(): void
-    {
-        $this->canOrExplode('read');
-        $this->isPinned() ? $this->rmFromPinned() : $this->addToPinned();
-    }
-
-    /**
-     * Get the items pinned by current users to display in show mode
-     *
-     * @return array
-     */
-    public function getPinned(): array
-    {
-        $sql = 'SELECT DISTINCT entity_id FROM pin2users WHERE users_id = :users_id AND type = :type';
-        $req = $this->Db->prepare($sql);
-        $req->bindParam(':users_id', $this->Users->userData['userid']);
-        $req->bindParam(':type', $this->type);
-
-        $this->Db->execute($req);
-
-        $ids = $req->fetchAll();
-        $pinArr = array();
-        $entity = clone $this;
-        foreach ($ids as $id) {
-            $entity->setId((int) $id['entity_id']);
-            $pinArr[] = $entity->read();
-        }
-        return $pinArr;
-    }
-
-    /**
-     * Remove current entity from pinned of current user
-     *
-     * @return void
-     */
-    protected function rmFromPinned(): void
-    {
-        $this->canOrExplode('read');
-
-        $sql = 'DELETE FROM pin2users WHERE entity_id = :entity_id AND users_id = :users_id AND type = :type';
-        $req = $this->Db->prepare($sql);
-        $req->bindParam(':users_id', $this->Users->userData['userid']);
-        $req->bindParam(':entity_id', $this->id, PDO::PARAM_INT);
-        $req->bindParam(':type', $this->type);
-
-        $this->Db->execute($req);
-    }
-
-    /**
      * Get the SQL string for read before the WHERE
      *
      * @param bool $getTags do we get the tags too?
      * @param bool $fullSelect select all the columns of entity
      * @return string
+     * @phan-suppress PhanPluginPrintfVariableFormatString
      */
     private function getReadSqlBeforeWhere(bool $getTags = true, bool $fullSelect = false): string
     {
-        $teamEventsJoin = '';
         if ($fullSelect) {
             // get all the columns of entity table
             $select = 'SELECT DISTINCT entity.*,
@@ -766,7 +665,7 @@ abstract class AbstractEntity
                 entity.lastchange,';
         }
         $select .= "uploads.up_item_id, uploads.has_attachment,
-            SUBSTRING_INDEX(GROUP_CONCAT(stepst.next_step SEPARATOR '|'), '|', 1) AS next_step,
+            SUBSTRING_INDEX(GROUP_CONCAT(stepst.next_step ORDER BY steps_ordering, steps_id SEPARATOR '|'), '|', 1) AS next_step,
             categoryt.id AS category_id,
             categoryt.name AS category,
             categoryt.color,
@@ -791,7 +690,7 @@ abstract class AbstractEntity
 
         $usersJoin = 'LEFT JOIN users ON (entity.userid = users.userid)';
         $teamJoin = sprintf(
-            'CROSS JOIN users2teams ON (users2teams.users_id = users.userid AND users2teams.teams_id = %s)',
+            'LEFT JOIN users2teams ON (users2teams.users_id = users.userid AND users2teams.teams_id = %s)',
             $this->Users->userData['team']
         );
 
@@ -808,11 +707,14 @@ abstract class AbstractEntity
         $stepsJoin = 'LEFT JOIN (
             SELECT %1$s_steps.item_id AS steps_item_id,
             %1$s_steps.body AS next_step,
+            %1$s_steps.ordering AS steps_ordering,
+            %1$s_steps.id AS steps_id,
             %1$s_steps.finished AS finished
             FROM %1$s_steps)
             AS stepst ON (
             entity.id = steps_item_id
             AND stepst.finished = 0)';
+        $linksJoin = 'LEFT JOIN %1$s_links AS linkst ON (linkst.item_id = entity.id)';
 
 
         $from = 'FROM %1$s AS entity';
@@ -840,6 +742,7 @@ abstract class AbstractEntity
             $tagsJoin,
             $eventsJoin,
             $stepsJoin,
+            $linksJoin,
             $usersJoin,
             $teamJoin,
             $uploadsJoin,
@@ -847,53 +750,5 @@ abstract class AbstractEntity
 
         // replace all %1$s by 'experiments' or 'items'
         return sprintf(implode(' ', $sqlArr), $this->type);
-    }
-
-    /**
-     * Get a list of experiments with title starting with $term and optional user filter
-     *
-     * @param string $term the query
-     * @return array
-     */
-    private function getExpList(string $term): array
-    {
-        $Entity = new Experiments($this->Users);
-        $term = filter_var($term, FILTER_SANITIZE_STRING);
-        $Entity->titleFilter = " AND entity.title LIKE '%$term%'";
-
-        return $Entity->readShow();
-    }
-
-    /**
-     * Get a list of items with a filter on the $term
-     *
-     * @param string $term the query
-     * @return array
-     */
-    private function getDbList(string $term): array
-    {
-        $Entity = new Database($this->Users);
-        $term = filter_var($term, FILTER_SANITIZE_STRING);
-        $Entity->titleFilter = " AND entity.title LIKE '%$term%'";
-
-        return $Entity->readShow();
-    }
-
-    /**
-     * Add current entity to pinned of current user
-     *
-     * @return void
-     */
-    private function addToPinned(): void
-    {
-        $this->canOrExplode('read');
-
-        $sql = 'INSERT INTO pin2users(users_id, entity_id, type) VALUES (:users_id, :entity_id, :type)';
-        $req = $this->Db->prepare($sql);
-        $req->bindParam(':users_id', $this->Users->userData['userid']);
-        $req->bindParam(':entity_id', $this->id, PDO::PARAM_INT);
-        $req->bindParam(':type', $this->type);
-
-        $this->Db->execute($req);
     }
 }

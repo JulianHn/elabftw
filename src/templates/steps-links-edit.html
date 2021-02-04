@@ -1,8 +1,8 @@
 {# for experiments or items the linksArr and stepsArr are already provided, for tpl it's in a loop #}
 {% if Entity.type == 'experiments_templates' %}
-  {% set stepsArr = Entity.Steps.readFromId(template.id) %}
-  {% set linksArr = Entity.Links.readFromId(template.id) %}
-  {% set Entity_id = template.id %}
+  {% set stepsArr = Entity.Steps.read() %}
+  {% set linksArr = Entity.Links.read() %}
+  {% set Entity_id = templateData.id %}
 {% else %}
   {% set Entity_id = Entity.id %}
 {% endif %}
@@ -32,11 +32,11 @@
               </div>
               <div class='input-group-prepend'>
                 <div class='input-group-text'>
-                  <input type='checkbox' {{ Entity.type == 'experiments_templates' ? 'disabled' }} autocomplete='off' {{ step.finished ? 'checked' }} data-stepid='{{ step.id }}' data-id='{{ Entity_id }}' class='stepbox'>
+                  <input type='checkbox' {{ Entity.type == 'experiments_templates' ? 'disabled' }} {{ step.finished ? 'checked' }} data-stepid='{{ step.id }}' data-id='{{ Entity_id }}' class='stepbox'>
                 </div>
               </div>
               <div class='pl-2 step-static form-control-plaintext {{ step.finished ? 'finished' }}'>
-                <span class='stepInput' data-type='{{ Entity.type }}' data-id='{{ step.id }}'>{{ step.body|raw }}</span>
+                <span class='stepInput' data-type='{{ Entity.type }}' data-id='{{ Entity_id }}' data-stepid='{{ step.id }}'>{{ step.body|raw }}</span>
                 {% if step.finished %}
                 <span class='mr-2 text-muted'>
                     {{ 'completed'|trans }} <span title='{{ step.finished_time }}' class='relative-moment'></span>
@@ -89,7 +89,7 @@
                 <div class='input-group-prepend'>
                     <span class='input-group-text'>{{ 'Add a link'|trans }}</span>
                 </div>
-                <input type='text' class='form-control linkinput' data-id='{{ Entity_id }}' placeholder='{{ 'from the database'|trans }}' />
+                <input type='text' id='linkinput' class='form-control linkinput' data-id='{{ Entity_id }}' placeholder='{{ 'from the database'|trans }}' />
             </div>
         </div>
     </section>

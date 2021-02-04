@@ -13,29 +13,22 @@ namespace Elabftw\Models;
 use function count;
 use Elabftw\Elabftw\Db;
 use Elabftw\Exceptions\ImproperActionException;
-use Elabftw\Interfaces\CrudInterface;
+use Elabftw\Interfaces\DestroyableInterface;
 use function mb_strlen;
 use PDO;
 
 /**
  * All about the revisions
  */
-class Revisions implements CrudInterface
+class Revisions implements DestroyableInterface
 {
     /** @var int MIN_DELTA the min number of characters different between two versions to trigger save */
     private const MIN_DELTA = 100;
 
-    /** @var Db $Db SQL Database */
-    private $Db;
+    private Db $Db;
 
-    /** @var AbstractEntity $Entity an instance of Experiments or Database */
-    private $Entity;
+    private AbstractEntity $Entity;
 
-    /**
-     * Constructor
-     *
-     * @param AbstractEntity $entity
-     */
     public function __construct(AbstractEntity $entity)
     {
         $this->Entity = $entity;
@@ -44,9 +37,6 @@ class Revisions implements CrudInterface
 
     /**
      * Add a revision if the changeset is big enough
-     *
-     * @param string $body
-     * @return void
      */
     public function create(string $body): void
     {
@@ -73,8 +63,6 @@ class Revisions implements CrudInterface
 
     /**
      * Get how many revisions we have
-     *
-     * @return int number of revisions existing
      */
     public function readCount(): int
     {
@@ -89,8 +77,6 @@ class Revisions implements CrudInterface
 
     /**
      * Read all revisions for an item
-     *
-     * @return array
      */
     public function readAll(): array
     {
@@ -111,10 +97,7 @@ class Revisions implements CrudInterface
     }
 
     /**
-     * Restore a revision
-     *
-     * @param int $revId The id of the revision we want to restore
-     * @return void
+     * Restore a revision from revision id
      */
     public function restore(int $revId): void
     {
@@ -132,34 +115,31 @@ class Revisions implements CrudInterface
         $this->Db->execute($req);
     }
 
-    /**
-     * Destroy a revision
-     *
-     * @param int $id
-     * @return void
-     */
-    public function destroy(int $id): void
+    public function destroy(int $id): bool
     {
         $sql = 'DELETE FROM ' . $this->Entity->type . '_revisions WHERE id = :id';
         $req = $this->Db->prepare($sql);
         $req->bindParam(':id', $id, PDO::PARAM_INT);
-        $this->Db->execute($req);
+        return $this->Db->execute($req);
     }
 
+    /**
+     * Make sure we don't store too many
+     */
     public function prune(): int
     {
+        $numberToRemove = 0;
         $current = count($this->readAll());
         $max = $this->getMaxCount();
         if ($current > $max) {
             $numberToRemove = $max - $current;
             $this->destroyOld($numberToRemove);
         }
+        return $numberToRemove;
     }
 
     /**
      * Get the maximum number of revisions allowed to be stored
-     *
-     * @return int
      */
     private function getMaxCount(): int
     {
@@ -171,7 +151,6 @@ class Revisions implements CrudInterface
      * Destroy old revisions
      *
      * @param int $num number of old revisions to destroy
-     * @return void
      */
     private function destroyOld(int $num = 1): void
     {
@@ -184,11 +163,8 @@ class Revisions implements CrudInterface
 
     /**
      * Get the body of a revision
-     *
-     * @param int $revId The id of the revision
-     * @return string
      */
-    private function readRev(int $revId)
+    private function readRev(int $revId): string
     {
         $sql = 'SELECT body FROM ' . $this->Entity->type . '_revisions WHERE id = :rev_id';
         $req = $this->Db->prepare($sql);
@@ -204,8 +180,6 @@ class Revisions implements CrudInterface
 
     /**
      * Check if item is locked before restoring it
-     *
-     * @return bool
      */
     private function isLocked(): bool
     {

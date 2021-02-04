@@ -12,21 +12,16 @@ namespace Elabftw\Models;
 
 use Elabftw\Elabftw\Db;
 use Elabftw\Exceptions\ImproperActionException;
-use Elabftw\Interfaces\CrudInterface;
+use Elabftw\Interfaces\DestroyableInterface;
 use PDO;
 
 /**
- * Store informations about different identity providers for auth with SAML
+ * Store information about different identity providers for auth with SAML
  */
-class Idps implements CrudInterface
+class Idps implements DestroyableInterface
 {
-    /** @var Db $Db SQL Database */
-    protected $Db;
+    protected Db $Db;
 
-    /**
-     * Constructor
-     *
-     */
     public function __construct()
     {
         $this->Db = Db::getConnection();
@@ -65,28 +60,7 @@ class Idps implements CrudInterface
     }
 
     /**
-     * Read info about an IDP
-     *
-     * @param int $id
-     * @return array
-     */
-    public function read(int $id): array
-    {
-        $sql = 'SELECT * FROM idps WHERE id = :id';
-        $req = $this->Db->prepare($sql);
-        $req->bindParam(':id', $id, PDO::PARAM_INT);
-        $this->Db->execute($req);
-        $res = $req->fetch();
-        if ($res === false) {
-            return array();
-        }
-        return $res;
-    }
-
-    /**
      * Read all IDPs
-     *
-     * @return array
      */
     public function readAll(): array
     {
@@ -142,13 +116,17 @@ class Idps implements CrudInterface
 
     /**
      * Get an active IDP
-     *
-     * @return array
      */
-    public function getActive(): array
+    public function getActive(?int $id = null): array
     {
-        $sql = 'SELECT * FROM idps WHERE active = 1 LIMIT 1';
+        $sql = 'SELECT * FROM idps WHERE active = 1';
+        if ($id !== null) {
+            $sql .= ' AND id = :id';
+        }
         $req = $this->Db->prepare($sql);
+        if ($id !== null) {
+            $req->bindParam(':id', $id, PDO::PARAM_INT);
+        }
         $this->Db->execute($req);
 
         $res = $req->fetch();
@@ -158,17 +136,11 @@ class Idps implements CrudInterface
         return $res;
     }
 
-    /**
-     * Destroy an IDP
-     *
-     * @param int $id
-     * @return void
-     */
-    public function destroy(int $id): void
+    public function destroy(int $id): bool
     {
         $sql = 'DELETE FROM idps WHERE id = :id';
         $req = $this->Db->prepare($sql);
         $req->bindParam(':id', $id, PDO::PARAM_INT);
-        $this->Db->execute($req);
+        return $this->Db->execute($req);
     }
 }

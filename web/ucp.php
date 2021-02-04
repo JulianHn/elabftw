@@ -10,6 +10,10 @@ declare(strict_types=1);
 
 namespace Elabftw\Elabftw;
 
+use Elabftw\Exceptions\DatabaseErrorException;
+use Elabftw\Exceptions\FilesystemErrorException;
+use Elabftw\Exceptions\IllegalActionException;
+use Elabftw\Exceptions\ImproperActionException;
 use Elabftw\Models\ApiKeys;
 use Elabftw\Models\TeamGroups;
 use Elabftw\Models\Templates;
@@ -31,10 +35,19 @@ try {
     $apiKeysArr = $ApiKeys->readAll();
 
     $TeamGroups = new TeamGroups($App->Users);
-    $teamGroupsArr = $TeamGroups->readAll();
+    $teamGroupsArr = $TeamGroups->read();
 
     $Templates = new Templates($App->Users);
-    $templatesArr = $Templates->readInclusive();
+    $templatesArr = $Templates->getWriteableTemplatesList();
+    $templateData = array();
+    if ($Request->query->has('templateid')) {
+        $Templates->setId((int) $Request->query->get('templateid'));
+        $templateData = $Templates->read();
+        $permissions = $Templates->getPermissions($templateData);
+        if ($permissions['write'] === false) {
+            throw new IllegalActionException('User tried to access a template without write permissions');
+        }
+    }
 
     // TEAM GROUPS
     // Added Visibility clause
@@ -47,6 +60,7 @@ try {
         'apiKeysArr' => $apiKeysArr,
         'langsArr' => Tools::getLangsArr(),
         'teamGroupsArr' => $teamGroupsArr,
+        'templateData' => $templateData,
         'templatesArr' => $templatesArr,
         'visibilityArr' => $visibilityArr,
     );

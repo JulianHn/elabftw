@@ -17,14 +17,14 @@ use Elabftw\Models\AbstractEntity;
  */
 class MakeJson extends AbstractMake
 {
-    /** @var array $idArr the input ids but in an array */
-    private $idArr = array();
+    // the input ids but in an array
+    private array $idArr = array();
 
     /**
      * Give me an id list and a type, I make json export
      *
      * @param AbstractEntity $entity
-     * @param string $idList 1+3+5+8
+     * @param string $idList 4 8 15 16 23 42
      * @return void
      */
     public function __construct(AbstractEntity $entity, string $idList)
@@ -53,7 +53,7 @@ class MakeJson extends AbstractMake
     public function getJson(): array
     {
         $res = array();
-        foreach ($this->idArr as $key => $id) {
+        foreach ($this->idArr as $id) {
             $this->Entity->setId((int) $id);
             $res[] = $this->Entity->read(true);
         }

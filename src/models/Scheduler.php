@@ -17,6 +17,8 @@ use Elabftw\Exceptions\ImproperActionException;
 use Elabftw\Exceptions\ResourceNotFoundException;
 use Elabftw\Traits\EntityTrait;
 use PDO;
+use function strlen;
+use function substr;
 
 /**
  * All about the team's scheduler
@@ -25,22 +27,12 @@ class Scheduler
 {
     use EntityTrait;
 
-    /** @var Database $Database instance of Database */
-    public $Database;
+    public Database $Database;
 
-    /** @var array $filters an array of arrays with filters for sql query */
-    private $filters;
-
-    /**
-     * Constructor
-     *
-     * @param Database $database
-     */
     public function __construct(Database $database)
     {
         $this->Db = Db::getConnection();
         $this->Database = $database;
-        $this->filters = array();
     }
 
     /**
@@ -74,7 +66,6 @@ class Scheduler
      *
      * @param string $start 2019-12-23T00:00:00 01:00
      * @param string $end 2019-12-30T00:00:00 01:00
-     * @return array
      */
     public function readAllFromTeam(string $start, string $end): array
     {
@@ -88,7 +79,7 @@ class Scheduler
             LEFT JOIN items_types ON items.category = items_types.id
             LEFT JOIN users AS u ON team_events.userid = u.userid
             WHERE team_events.team = :team
-            AND team_events.start > :start AND team_events.end < :end";
+            AND team_events.start > :start AND team_events.end <= :end";
         $req = $this->Db->prepare($sql);
         $req->bindParam(':team', $this->Database->Users->userData['team'], PDO::PARAM_INT);
         $req->bindParam(':start', $start);
@@ -107,7 +98,6 @@ class Scheduler
      *
      * @param string $start 2019-12-23T00:00:00 01:00
      * @param string $end 2019-12-30T00:00:00 01:00
-     * @return array
      */
     public function read(string $start, string $end): array
     {
@@ -121,10 +111,9 @@ class Scheduler
             LEFT JOIN experiments ON (experiments.id = team_events.experiment)
             LEFT JOIN items_types ON items.category = items_types.id
             LEFT JOIN users AS u ON team_events.userid = u.userid
-            WHERE team_events.team = :team AND team_events.item = :item
-            AND team_events.start > :start AND team_events.end < :end";
+            WHERE team_events.item = :item
+            AND team_events.start > :start AND team_events.end <= :end";
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':team', $this->Database->Users->userData['team'], PDO::PARAM_INT);
         $req->bindParam(':item', $this->Database->id, PDO::PARAM_INT);
         $req->bindParam(':start', $start);
         $req->bindParam(':end', $end);
@@ -139,8 +128,6 @@ class Scheduler
 
     /**
      * Read info from an event id
-     *
-     * @return array
      */
     public function readFromId(): array
     {
@@ -160,23 +147,19 @@ class Scheduler
     /**
      * Update the start (and end) of an event (when you drag and drop it)
      *
-     * @param array $delta timedelta
-     * @return void
+     * @param array<string, string> $delta timedelta
      */
     public function updateStart(array $delta): void
     {
         $event = $this->readFromId();
-        if (empty($event)) {
-            return;
-        }
-        $oldStart = new DateTime($event['start']);
-        $oldEnd = new DateTime($event['end']);
+        $oldStart = DateTime::createFromFormat(DateTime::ISO8601, $event['start']);
+        $oldEnd = DateTime::createFromFormat(DateTime::ISO8601, $event['end']);
         $seconds = '0';
-        if (\strlen($delta['milliseconds']) > 3) {
-            $seconds = \substr($delta['milliseconds'], 0, -3);
+        if (strlen($delta['milliseconds']) > 3) {
+            $seconds = substr($delta['milliseconds'], 0, -3);
         }
-        $newStart = $oldStart->modify('+' . $delta['days'] . ' day')->modify('+' . $seconds . ' seconds');
-        $newEnd = $oldEnd->modify('+' . $delta['days'] . ' day')->modify('+' . $seconds . ' seconds');
+        $newStart = $oldStart->modify('+' . $delta['days'] . ' day')->modify('+' . $seconds . ' seconds'); // @phpstan-ignore-line
+        $newEnd = $oldEnd->modify('+' . $delta['days'] . ' day')->modify('+' . $seconds . ' seconds'); // @phpstan-ignore-line
 
         $sql = 'UPDATE team_events SET start = :start, end = :end WHERE team = :team AND id = :id';
         $req = $this->Db->prepare($sql);
@@ -190,21 +173,17 @@ class Scheduler
     /**
      * Update the end of an event (when you resize it)
      *
-     * @param array $delta timedelta
-     * @return void
+     * @param array<string, string> $delta timedelta
      */
     public function updateEnd(array $delta): void
     {
         $event = $this->readFromId();
-        if (empty($event)) {
-            return;
-        }
-        $oldEnd = new DateTime($event['end']);
+        $oldEnd = DateTime::createFromFormat(DateTime::ISO8601, $event['end']);
         $seconds = '0';
-        if (\strlen($delta['milliseconds']) > 3) {
-            $seconds = \substr($delta['milliseconds'], 0, -3);
+        if (strlen($delta['milliseconds']) > 3) {
+            $seconds = substr($delta['milliseconds'], 0, -3);
         }
-        $newEnd = $oldEnd->modify('+' . $delta['days'] . ' day')->modify('+' . $seconds . ' seconds');
+        $newEnd = $oldEnd->modify('+' . $delta['days'] . ' day')->modify('+' . $seconds . ' seconds'); // @phpstan-ignore-line
 
         $sql = 'UPDATE team_events SET end = :end WHERE team = :team AND id = :id';
         $req = $this->Db->prepare($sql);
@@ -218,7 +197,6 @@ class Scheduler
      * Bind an experiment to a calendar event
      *
      * @param int $expid id of the experiment
-     * @return void
      */
     public function bind(int $expid): void
     {
@@ -232,8 +210,6 @@ class Scheduler
 
     /**
      * Unbind an experiment from a calendar event
-     *
-     * @return void
      */
     public function unbind(): void
     {
@@ -246,8 +222,6 @@ class Scheduler
 
     /**
      * Remove an event
-     *
-     * @return void
      */
     public function destroy(): void
     {

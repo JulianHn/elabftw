@@ -10,7 +10,7 @@
  */
 
 // CORE
-import { library, dom, config } from '@fortawesome/fontawesome-svg-core';
+import { library, dom } from '@fortawesome/fontawesome-svg-core';
 
 // SOLID
 import {
@@ -73,6 +73,7 @@ import {
   faTags,
   faThumbtack,
   faTimes,
+  faTools,
   faTrashAlt,
   faUpload,
   faUser,
@@ -140,6 +141,7 @@ library.add(
   faTags,
   faThumbtack,
   faTimes,
+  faTools,
   faTrashAlt,
   faUpload,
   faUser,

@@ -1,4 +1,4 @@
-<?php declare(strict_types=1);
+<?php
 /**
  * sysconfig.php
  *
@@ -8,6 +8,7 @@
  * @license AGPL-3.0
  * @package elabftw
  */
+declare(strict_types=1);
 
 namespace Elabftw\Elabftw;
 
@@ -39,7 +40,6 @@ try {
     $Idps = new Idps();
     $idpsArr = $Idps->readAll();
     $Teams = new Teams($App->Users);
-    $UsersHelper = new UsersHelper();
     $teamsArr = $Teams->readAll();
     $teamsStats = $Teams->getAllStats();
 
@@ -49,6 +49,10 @@ try {
     if ($Request->query->has('q')) {
         $isSearching = true;
         $usersArr = $App->Users->readFromQuery(filter_var($Request->query->get('q'), FILTER_SANITIZE_STRING));
+        foreach ($usersArr as &$user) {
+            $UsersHelper = new UsersHelper((int) $user['userid']);
+            $user['teams'] = $UsersHelper->getTeamsFromUserid();
+        }
     }
 
     $ReleaseCheck = new ReleaseCheck($App->Config);
@@ -75,7 +79,6 @@ try {
 
     $template = 'sysconfig.html';
     $renderArr = array(
-        'UsersHelper' => $UsersHelper,
         'Teams' => $Teams,
         'elabimgVersion' => $elabimgVersion,
         'ReleaseCheck' => $ReleaseCheck,

@@ -10,28 +10,27 @@ declare(strict_types=1);
 
 namespace Elabftw\Models;
 
+use function array_column;
+use function count;
 use Elabftw\Elabftw\Db;
+use Elabftw\Elabftw\ParamsProcessor;
 use Elabftw\Exceptions\DatabaseErrorException;
-use Elabftw\Exceptions\ImproperActionException;
-use Elabftw\Interfaces\CrudInterface;
+use Elabftw\Exceptions\IllegalActionException;
+use Elabftw\Interfaces\CreatableInterface;
+use Elabftw\Interfaces\DestroyableInterface;
+use Elabftw\Interfaces\UpdatableInterface;
+use function implode;
 use PDO;
 
 /**
  * All about the tag
  */
-class Tags implements CrudInterface
+class Tags implements CreatableInterface, UpdatableInterface, DestroyableInterface
 {
-    /** @var AbstractEntity $Entity an instance of AbstractEntity */
-    public $Entity;
+    public AbstractEntity $Entity;
 
-    /** @var Db $Db SQL Database */
-    protected $Db;
+    protected Db $Db;
 
-    /**
-     * Constructor
-     *
-     * @param AbstractEntity $entity
-     */
     public function __construct(AbstractEntity $entity)
     {
         $this->Db = Db::getConnection();
@@ -40,21 +39,17 @@ class Tags implements CrudInterface
 
     /**
      * Create a tag
-     *
-     * @param string $tag
-     * @return int
      */
-    public function create(string $tag): int
+    public function create(ParamsProcessor $params): int
     {
         $this->Entity->canOrExplode('write');
-        $tag = $this->checkTag($tag);
 
         $insertSql2 = 'INSERT INTO tags2entity (item_id, item_type, tag_id) VALUES (:item_id, :item_type, :tag_id)';
         $insertReq2 = $this->Db->prepare($insertSql2);
         // check if the tag doesn't exist already for the team
         $sql = 'SELECT id FROM tags WHERE tag = :tag AND team = :team';
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':tag', $tag);
+        $req->bindParam(':tag', $params->tag);
         $req->bindParam(':team', $this->Entity->Users->userData['team'], PDO::PARAM_INT);
         $this->Db->execute($req);
         $tagId = (int) $req->fetchColumn();
@@ -63,7 +58,7 @@ class Tags implements CrudInterface
         if ($req->rowCount() === 0) {
             $insertSql = 'INSERT INTO tags (team, tag) VALUES (:team, :tag)';
             $insertReq = $this->Db->prepare($insertSql);
-            $insertReq->bindParam(':tag', $tag);
+            $insertReq->bindParam(':tag', $params->tag);
             $insertReq->bindParam(':team', $this->Entity->Users->userData['team'], PDO::PARAM_INT);
             $this->Db->execute($insertReq);
             $tagId = $this->Db->lastInsertId();
@@ -160,73 +155,55 @@ class Tags implements CrudInterface
 
     /**
      * Update a tag
-     *
-     * @param string $tag tag value
-     * @param string $newtag new tag value
-     * @return void
      */
-    public function update(string $tag, string $newtag): void
+    public function update(ParamsProcessor $params): string
     {
-        $this->Entity->canOrExplode('write');
-        $newtag = $this->checkTag($newtag);
+        if ($this->Entity->Users->userData['is_admin'] !== '1') {
+            throw new IllegalActionException('Only an admin can update a tag!');
+        }
 
-        $sql = 'UPDATE tags SET tag = :newtag WHERE tag = :tag AND team = :team';
+        // use the team in the query to prevent one admin from editing tags from another team
+        $sql = 'UPDATE tags SET tag = :tag WHERE id = :id AND team = :team';
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':tag', $tag);
-        $req->bindParam(':newtag', $newtag);
+        $req->bindParam(':id', $params->id, PDO::PARAM_INT);
+        $req->bindParam(':tag', $params->tag, PDO::PARAM_STR);
         $req->bindParam(':team', $this->Entity->Users->userData['team'], PDO::PARAM_INT);
         $this->Db->execute($req);
+
+        return $params->tag;
     }
 
     /**
      * If we have the same tag (after correcting a typo),
      * remove the tags that are the same and reference only one
      *
-     * @param string $tag the tag to dedup
      * @return int the number of duplicates removed
      */
-    public function deduplicate(string $tag): int
+    public function deduplicate(): int
     {
-        $sql = 'SELECT * FROM tags WHERE tag = :tag AND team = :team';
+        if ($this->Entity->Users->userData['is_admin'] !== '1') {
+            throw new IllegalActionException('Only an admin can deduplicate!');
+        }
+        // first get the ids of all the tags that are duplicated in the team
+        $sql = 'SELECT GROUP_CONCAT(id) AS id_list FROM tags WHERE tag in (
+            SELECT tag FROM tags WHERE team = :team GROUP BY tag HAVING COUNT(*) > 1
+        ) GROUP BY tag;';
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':tag', $tag);
         $req->bindParam(':team', $this->Entity->Users->userData['team'], PDO::PARAM_INT);
         $this->Db->execute($req);
-        $count = $req->rowCount();
-        if ($count < 2) {
+
+        $idsToDelete = $req->fetchAll();
+        if ($idsToDelete === false) {
             return 0;
         }
-
-        // ok we have several tags that are the same in the same team
-        // we want to update the reference mentionning them for the original tag id
-        $tags = $req->fetchAll();
-        if ($tags === false) {
-            return 0;
-        }
-        // the first tag we find is the one we keep
-        $targetTagId = $tags[0]['id'];
-
-        // skip the first tag because we want to keep it
-        // array holding all the tags we want to see disappear
-        $tagsToDelete = array_slice($tags, 1);
-
-        foreach ($tagsToDelete as $tag) {
-            $sql = 'UPDATE tags2entity SET tag_id = :target_tag_id WHERE tag_id = :tag_id';
-            $req = $this->Db->prepare($sql);
-            $req->bindParam(':target_tag_id', $targetTagId, PDO::PARAM_INT);
-            $req->bindParam(':tag_id', $tag['id'], PDO::PARAM_INT);
-            $this->Db->execute($req);
+        if (!empty($idsToDelete)) {
+            // loop on each tag that needs to be deduplicated and do the work
+            foreach ($idsToDelete as $idsList) {
+                $this->deduplicateFromIdsList($idsList['id_list']);
+            }
         }
 
-        // now delete the duplicate tags from the tags table
-        $sql = 'DELETE FROM tags WHERE id = :id';
-        $req = $this->Db->prepare($sql);
-        foreach ($tagsToDelete as $tag) {
-            $req->bindParam(':id', $tag['id'], PDO::PARAM_INT);
-            $this->Db->execute($req);
-        }
-
-        return count($tagsToDelete);
+        return count($idsToDelete);
     }
 
     /**
@@ -237,6 +214,8 @@ class Tags implements CrudInterface
      */
     public function unreference(int $tagId): void
     {
+        $this->Entity->canOrExplode('write');
+
         $sql = 'DELETE FROM tags2entity WHERE tag_id = :tag_id AND item_id = :item_id';
         $req = $this->Db->prepare($sql);
         $req->bindParam(':tag_id', $tagId, PDO::PARAM_INT);
@@ -257,12 +236,12 @@ class Tags implements CrudInterface
 
     /**
      * Destroy a tag completely. Unreference it from everywhere and then delete it
-     *
-     * @param int $tagId id of the tag
-     * @return void
      */
-    public function destroy(int $tagId): void
+    public function destroy(int $tagId): bool
     {
+        if ($this->Entity->Users->userData['is_admin'] !== '1') {
+            throw new IllegalActionException('Only an admin can update a tag!');
+        }
         // first unreference the tag
         $sql = 'DELETE FROM tags2entity WHERE tag_id = :tag_id';
         $req = $this->Db->prepare($sql);
@@ -273,7 +252,7 @@ class Tags implements CrudInterface
         $sql = 'DELETE FROM tags WHERE id = :tag_id';
         $req = $this->Db->prepare($sql);
         $req->bindParam(':tag_id', $tagId, PDO::PARAM_INT);
-        $this->Db->execute($req);
+        return $this->Db->execute($req);
     }
 
     /**
@@ -285,73 +264,79 @@ class Tags implements CrudInterface
      */
     public function destroyAll(): void
     {
-        $sql = 'DELETE FROM tags2entity WHERE item_id = :id';
+        $sql = 'DELETE FROM tags2entity WHERE item_id = :id AND item_type = :type';
         $req = $this->Db->prepare($sql);
         $req->bindParam(':id', $this->Entity->id, PDO::PARAM_INT);
+        $req->bindParam(':type', $this->Entity->type);
         $this->Db->execute($req);
     }
 
     /**
      * Get a list of entity id filtered by tags
      *
-     * @param array $tags tags from the query string
+     * @param array<array-key, string> $tags tags from the query string
      * @param int $team current logged in team
      * @return array
      */
     public function getIdFromTags(array $tags, int $team): array
     {
-        $tagIds = array();
+        $results = array();
+        $sql = 'SELECT id FROM tags WHERE tag = :tag AND team = :team';
+        $req = $this->Db->prepare($sql);
         foreach ($tags as $tag) {
-            $sql = 'SELECT id FROM tags WHERE tag = :tag AND team = :team';
-            $req = $this->Db->prepare($sql);
             $req->bindParam(':tag', $tag);
             $req->bindParam(':team', $team, PDO::PARAM_INT);
             $req->execute();
-            $results = $req->fetchAll();
-            if ($results === false) {
-                return array();
-            }
-            foreach ($results as $res) {
-                $tagIds[] = (int) $res['id'];
+            $res = $req->fetch();
+            if ($res !== false) {
+                $results[] = $res;
             }
         }
+        $tagIds = array_column($results, 'id');
 
+        // look for item ids that have all the tags not only one of them
         $itemIds = array();
-        foreach ($tagIds as $tagid) {
-            $sql = 'SELECT item_id FROM tags2entity WHERE tag_id = :tagid AND item_type = :type';
-            $req = $this->Db->prepare($sql);
-            $req->bindParam(':tagid', $tagid, PDO::PARAM_INT);
-            $req->bindParam(':type', $this->Entity->type);
-            $req->execute();
-            $results = $req->fetchAll();
-            if ($results === false) {
-                return array();
-            }
-            foreach ($results as $res) {
-                $itemIds[] = (int) $res['item_id'];
-            }
+        $sql = 'SELECT item_id FROM `tags2entity` WHERE tag_id IN (' . implode(',', $tagIds) . ')
+            AND item_type = "' . $this->Entity->type . '" GROUP By item_id HAVING COUNT(DISTINCT tag_id) = ' . count($tagIds);
+        $req = $this->Db->prepare($sql);
+        $req->execute();
+        $results = $req->fetchAll();
+        if ($results === false) {
+            return array();
+        }
+        foreach ($results as $res) {
+            $itemIds[] = (int) $res['item_id'];
         }
         return $itemIds;
     }
 
     /**
-     * Sanitize tag, we remove '\' because it fucks up the javascript if you have this in the tags
-     * also remove | because we use this as separator for tags in SQL
+     * Take a list of tags id and deduplicate them
+     * Update the references and delete the tags from the tags table
      *
-     * @param string $tag The tag to check
-     * @return string
+     * @param string $idsList example: 23,42,1337
+     * @return void
      */
-    private function checkTag(string $tag): string
+    private function deduplicateFromIdsList(string $idsList): void
     {
-        $tag = filter_var($tag, FILTER_SANITIZE_STRING);
-        if ($tag === false) {
-            throw new ImproperActionException(sprintf(_('Input is too short! (minimum: %d)'), 1));
+        // convert the string list into an array
+        $idsArr = explode(',', $idsList);
+        // pop one out and keep this one
+        $idToKeep = array_pop($idsArr);
+
+        // now update the references with the id that we keep
+        foreach ($idsArr as $id) {
+            $sql = 'UPDATE tags2entity SET tag_id = :target_tag_id WHERE tag_id = :tag_id';
+            $req = $this->Db->prepare($sql);
+            $req->bindParam(':target_tag_id', $idToKeep, PDO::PARAM_INT);
+            $req->bindParam(':tag_id', $id, PDO::PARAM_INT);
+            $this->Db->execute($req);
+
+            // and delete that id from the tags table
+            $sql = 'DELETE FROM tags WHERE id = :id';
+            $req = $this->Db->prepare($sql);
+            $req->bindParam(':id', $id, PDO::PARAM_INT);
+            $this->Db->execute($req);
         }
-        $tag = \trim(str_replace(array('\\', '|'), array('', ' '), $tag));
-        // empty tags are disallowed
-        if ($tag === '') {
-            throw new ImproperActionException(sprintf(_('Input is too short! (minimum: %d)'), 1));
-        }
-        return $tag;
     }
 }

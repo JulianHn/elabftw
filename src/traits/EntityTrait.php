@@ -20,21 +20,16 @@ use Elabftw\Services\Check;
  */
 trait EntityTrait
 {
-    /** @var int|null $id Id of the entity */
-    public $id;
+    public ?int $id;
 
-    /** @var array $entityData content of entity */
-    public $entityData = array();
+    public array $entityData = array();
 
-    /** @var Db $Db SQL Database */
-    protected $Db;
+    public array $filters = array();
+
+    protected Db $Db;
 
     /**
      * Check and set id
-     *
-     * @param int $id
-     * @throws IllegalActionException
-     * @return void
      */
     public function setId(int $id): void
     {
@@ -43,7 +38,7 @@ trait EntityTrait
         }
         $this->id = $id;
         // prevent reusing of old data from previous id
-        unset($this->entityData);
-        unset($this->filters);
+        $this->entityData = array();
+        $this->filters = array();
     }
 }

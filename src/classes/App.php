@@ -12,7 +12,6 @@ namespace Elabftw\Elabftw;
 
 use Elabftw\Models\Config;
 use Elabftw\Models\Teams;
-use Elabftw\Models\Todolist;
 use Elabftw\Models\Users;
 use Elabftw\Services\Check;
 use Elabftw\Traits\TwigTrait;
@@ -21,7 +20,8 @@ use Monolog\Handler\ErrorLogHandler;
 use Monolog\Logger;
 use function substr;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Session\Session;
+use Symfony\Component\HttpFoundation\Session\Flash\FlashBag;
+use Symfony\Component\HttpFoundation\Session\SessionInterface;
 
 /**
  * This is a super class holding various global objects
@@ -31,57 +31,42 @@ class App
     use UploadTrait;
     use TwigTrait;
 
-    /** @var Request $Request the request */
-    public $Request;
+    public Request $Request;
 
-    /** @var Session $Session the session */
-    public $Session;
+    public SessionInterface $Session;
 
-    /** @var Config $Config the config stored in sql */
-    public $Config;
+    public Config $Config;
 
-    /** @var Logger $Log instance of Logger */
-    public $Log;
+    public Logger $Log;
 
-    /** @var Csrf $Csrf instance of Csrf */
-    public $Csrf;
+    public Csrf $Csrf;
 
-    /** @var Users $Users instance of Users */
-    public $Users;
+    public Users $Users;
 
-    /** @var Db $Db SQL Database */
-    public $Db;
+    public string $pageTitle = 'Lab manager';
 
-    /** @var string $pageTitle the title for the current page */
-    public $pageTitle = 'Lab manager';
+    public array $ok = array();
 
-    /** @var array $ok the ok messages from flashBag */
-    public $ok = array();
+    public array $ko = array();
 
-    /** @var array $ko the ko messages from flashBag */
-    public $ko = array();
+    public array $warning = array();
 
-    /** @var array $warning the warning messages from flashBag */
-    public $warning = array();
+    public array $teamConfigArr = array();
 
-    /** @var array $todoItems items on the todolist, populated if logged in */
-    public $todoItems = array();
+    protected Db $Db;
 
-    /** @var array $teamConfigArr the config for the current team */
-    public $teamConfigArr = array();
-
-    /**
-     * Constructor
-     *
-     * @param Request $request
-     */
-    public function __construct(Request $request, Session $session, Config $config, Logger $log, Csrf $csrf)
+    public function __construct(Request $request, SessionInterface $session, Config $config, Logger $log, Csrf $csrf)
     {
         $this->Request = $request;
         $this->Session = $session;
-        $this->ok = $this->Session->getFlashBag()->get('ok');
-        $this->ko = $this->Session->getFlashBag()->get('ko');
-        $this->warning = $this->Session->getFlashBag()->get('warning');
+
+        $flashBag = $this->Session->getBag('flashes');
+        // add type check because SessionBagInterface doesn't have get(), only FlashBag has it
+        if ($flashBag instanceof FlashBag) {
+            $this->ok = $flashBag->get('ok');
+            $this->ko = $flashBag->get('ko');
+            $this->warning = $flashBag->get('warning');
+        }
 
         $this->Config = $config;
         $this->Log = $log;
@@ -97,28 +82,24 @@ class App
 
     /**
      * Get the page generation time (called in the footer)
-     *
-     * @return float
      */
     public function getGenerationTime(): float
     {
         return round(microtime(true) - $this->Request->server->get('REQUEST_TIME_FLOAT'), 5);
     }
 
-    /**
-     * Get the current memory usage (called in the footer)
-     *
-     * @return int
-     */
     public function getMemoryUsage(): int
     {
         return memory_get_usage();
     }
 
+    public function getNumberOfQueries(): int
+    {
+        return $this->Db->getNumberOfQueries();
+    }
+
     /**
-     * Get the mininum password length for injecting in templates
-     *
-     * @return int
+     * Get the minimum password length for injecting in templates
      */
     public function getMinPasswordLength(): int
     {
@@ -127,17 +108,10 @@ class App
 
     /**
      * If the current user is authenticated, load Users with an id
-     *
-     * @param Users $users
-     * @return void
      */
     public function loadUser(Users $users): void
     {
         $this->Users = $users;
-
-        // todolist
-        $Todolist = new Todolist($this->Users);
-        $this->todoItems = $Todolist->readAll();
 
         // team config
         $Teams = new Teams($this->Users);
@@ -146,8 +120,6 @@ class App
 
     /**
      * Get the lang (in short form like 'en' or 'fr') for the HTML attribute in head.html template
-     *
-     * @return string
      */
     public function getLangForHtmlAttribute(): string
     {
@@ -163,7 +135,7 @@ class App
      * Generate HTML from a twig template. The App object is injected into every template.
      *
      * @param string $template template located in app/tpl/
-     * @param array $variables the variables injected in the template
+     * @param array<string, mixed> $variables the variables injected in the template
      * @return string html
      */
     public function render(string $template, array $variables): string

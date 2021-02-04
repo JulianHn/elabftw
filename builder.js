@@ -32,7 +32,6 @@ module.exports = {
       './src/ts/view.ts',
       './src/ts/comments.ts',
       './src/ts/editusers.ts',
-      './src/ts/profile.ts',
       './src/ts/search.ts',
       './src/ts/show.ts',
       './src/ts/sysconfig.ts',
@@ -47,7 +46,7 @@ module.exports = {
       // load tex with all the extensions
       'mathjax/es5/tex-svg-full.js',
       'prismjs',
-      // see list in edit.js tinymce codesample plugin settings
+      // see list in tinymce.ts for codesample plugin settings
       'prismjs/components/prism-bash.js',
       'prismjs/components/prism-c.js',
       'prismjs/components/prism-cpp.js',
@@ -58,6 +57,7 @@ module.exports = {
       'prismjs/components/prism-javascript.js',
       'prismjs/components/prism-julia.js',
       'prismjs/components/prism-latex.js',
+      'prismjs/components/prism-lua.js',
       'prismjs/components/prism-makefile.js',
       'prismjs/components/prism-matlab.js',
       'prismjs/components/prism-perl.js',
@@ -66,6 +66,9 @@ module.exports = {
       'prismjs/components/prism-ruby.js',
     ],
   },
+  // uncomment this to find where the error is coming from
+  // makes the build slower
+  //devtool: 'inline-source-map',
   plugins: [
     // only load the moment locales that we are interested in
     new webpack.ContextReplacementPlugin(/moment[\\\/]locale$/, /^\.\/(ca|de|en|es|fr|it|id|ja|kr|nl|pl|pt|pt-br|ru|sk|sl|zh-cn)$/),
@@ -78,24 +81,6 @@ module.exports = {
   optimization: {
     splitChunks: {
       chunks: 'all',
-      minSize: 30000,
-      maxSize: 0,
-      minChunks: 1,
-      maxAsyncRequests: 6,
-      maxInitialRequests: 4,
-      automaticNameDelimiter: '~',
-      automaticNameMaxLength: 50,
-      cacheGroups: {
-        vendors: {
-          test: /[\\/]node_modules[\\/]/,
-          priority: -10
-        },
-        default: {
-          minChunks: 2,
-          priority: -20,
-          reuseExistingChunk: true
-        }
-      }
     },
   },
   module: {
@@ -136,6 +121,13 @@ module.exports = {
           options: {
             exposes: 'moment',
           },
+      },
+      // use a custom loader for 3Dmol.js
+      {
+        test: /3Dmol-nojquery.js$/,
+        use: {
+          loader: path.resolve('src/ts/3Dmol-loader.js'),
+        },
       }
     ]
   }

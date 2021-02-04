@@ -10,12 +10,17 @@ declare(strict_types=1);
 
 namespace Elabftw\Services;
 
+use function dirname;
 use Elabftw\Elabftw\Tools;
 use Elabftw\Exceptions\FilesystemErrorException;
 use Elabftw\Models\AbstractEntity;
 use Elabftw\Models\Experiments;
 use Elabftw\Models\Users;
+use function file_exists;
+use function is_dir;
+use function mkdir;
 use Mpdf\Mpdf;
+use function preg_match;
 use function str_replace;
 use Symfony\Component\HttpFoundation\Request;
 
@@ -24,8 +29,7 @@ use Symfony\Component\HttpFoundation\Request;
  */
 class MakePdf extends AbstractMake
 {
-    /** @var string $longName a sha512 sum.pdf */
-    public $longName;
+    public string $longName;
 
     /**
      * Constructor
@@ -43,8 +47,8 @@ class MakePdf extends AbstractMake
             $this->filePath = $this->getTmpPath() . $this->getUniqueString();
         } else {
             $this->filePath = $this->getUploadsPath() . $this->longName;
-            $dir = \dirname($this->filePath);
-            if (!\is_dir($dir) && !\mkdir($dir, 0700, true) && !\is_dir($dir)) {
+            $dir = dirname($this->filePath);
+            if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) {
                 throw new FilesystemErrorException('Cannot create folder! Check permissions of uploads folder.');
             }
         }
@@ -109,7 +113,7 @@ class MakePdf extends AbstractMake
      *
      * @return Mpdf
      */
-    public function initializeMpdf($multiEntity = false): Mpdf
+    public function initializeMpdf(bool $multiEntity = false): Mpdf
     {
         $format = $this->Entity->Users->userData['pdf_format'];
 
@@ -207,7 +211,7 @@ class MakePdf extends AbstractMake
     private function addLinkedItems(): string
     {
         $html = '';
-        $linksArr = $this->Entity->Links->readAll();
+        $linksArr = $this->Entity->Links->read();
         if (empty($linksArr)) {
             return $html;
         }
@@ -243,7 +247,7 @@ class MakePdf extends AbstractMake
     {
         $html = '';
 
-        $commentsArr = $this->Entity->Comments->readAll();
+        $commentsArr = $this->Entity->Comments->read();
         if (empty($commentsArr)) {
             return $html;
         }
@@ -318,10 +322,10 @@ class MakePdf extends AbstractMake
                 $ext = Tools::getExt($upload['real_name']);
                 $filePath = \dirname(__DIR__, 2) . '/uploads/' . $upload['long_name'];
                 // if it's a TIF file, we can't add it like that to the pdf, but we can add the thumbnail
-                if (\preg_match('/(tiff|tif)$/i', $ext)) {
+                if (preg_match('/(tiff|tif)$/i', $ext)) {
                     $filePath .= '_th.jpg';
                 }
-                if (\file_exists($filePath) && preg_match('/(tiff|tif|jpg|jpeg|png|gif)$/i', $ext)) {
+                if (file_exists($filePath) && preg_match('/(tiff|tif|jpg|jpeg|png|gif)$/i', $ext)) {
                     $html .= "<br /><img class='attached-image' src='" . $filePath . "' alt='attached image' />";
                 }
 
@@ -341,7 +345,7 @@ class MakePdf extends AbstractMake
     {
         $html = '';
 
-        $stepsArr = $this->Entity->Steps->readAll();
+        $stepsArr = $this->Entity->Steps->read();
         if (empty($stepsArr)) {
             return $html;
         }
@@ -459,7 +463,7 @@ Witness' signature:<br><br>
 <htmlpagefooter name="footer">' . $pdfSig . '
     <div class="footer-block footer">
         PDF generated with <a href="https://www.elabftw.net">elabftw</a>, a free and open source lab notebook
-        <p style="font-size:6pt;">File generated on {DATE d-m-Y} at {DATE H:m}</p>
+        <p style="font-size:6pt;">File generated on {DATE d-m-Y} at {DATE H:i}</p>
     </div>
 </htmlpagefooter>
 <sethtmlpageheader name="header" value="on" show-this-page="1" />

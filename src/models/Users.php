@@ -11,43 +11,38 @@ declare(strict_types=1);
 namespace Elabftw\Models;
 
 use Elabftw\Elabftw\Db;
-use Elabftw\Elabftw\Tools;
 use Elabftw\Exceptions\IllegalActionException;
 use Elabftw\Exceptions\ImproperActionException;
+use Elabftw\Exceptions\ResourceNotFoundException;
 use Elabftw\Services\Check;
 use Elabftw\Services\Email;
 use Elabftw\Services\Filter;
+use Elabftw\Services\TeamsHelper;
 use Elabftw\Services\UsersHelper;
+use function filter_var;
+use function hash;
 use function in_array;
+use function mb_strlen;
+use function password_hash;
 use PDO;
-use function setcookie;
+use function time;
 
 /**
  * Users
  */
 class Users
 {
-    /** @var bool $needValidation flag to check if we need validation or not */
-    public $needValidation = false;
+    public bool $needValidation = false;
 
-    /** @var array $userData what you get when you read() */
-    public $userData = array();
+    public array $userData = array();
 
-    /** @var Db $Db SQL Database */
-    protected $Db;
+    protected Db $Db;
 
-    /** @var int $team */
-    private $team;
+    private int $team = 0;
 
-    /**
-     * Constructor
-     *
-     * @param int|null $userid
-     */
     public function __construct(?int $userid = null, ?int $team = null)
     {
         $this->Db = Db::getConnection();
-        $this->team = 0;
         if ($team !== null) {
             $this->team = $team;
         }
@@ -58,8 +53,6 @@ class Users
 
     /**
      * Populate userData property
-     *
-     * @param int $userid
      */
     public function populate(int $userid): void
     {
@@ -70,24 +63,17 @@ class Users
 
     /**
      * Create a new user. If no password is provided, it's because we create it from SAML.
-     *
-     * @param string $email
-     * @param array $teams
-     * @param string $firstname
-     * @param string $lastname
-     * @param string $password
-     * @param int|null $group
-     * @param bool $forceValidation used when user is created from SAML login
-     * @return int the new userid
      */
-    public function create(string $email, array $teams, string $firstname = '', string $lastname = '', string $password = '', ?int $group = null, bool $forceValidation = false): int
+    public function create(string $email, array $teams, string $firstname = '', string $lastname = '', string $password = '', ?int $group = null, bool $forceValidation = false, bool $normalizeTeams = true, bool $alertAdmin = true): int
     {
         $Config = new Config();
         $Teams = new Teams($this);
-        $UsersHelper = new UsersHelper();
 
-        // validate teams
-        $Teams->validateTeams($teams);
+        // make sure that all the teams in which the user will be are created/exist
+        // this might throw an exception if the team doesn't exist and we can't create it on the fly
+        if ($normalizeTeams) {
+            $teams = $Teams->getTeamsFromIdOrNameOrOrgidArray($teams);
+        }
         // check for duplicate of email
         if ($this->isDuplicateEmail($email)) {
             throw new ImproperActionException(_('Someone is already using that email address!'));
@@ -97,21 +83,20 @@ class Users
             Check::passwordLength($password);
         }
 
-        $firstname = \filter_var($firstname, FILTER_SANITIZE_STRING);
-        $lastname = \filter_var($lastname, FILTER_SANITIZE_STRING);
+        $firstname = filter_var($firstname, FILTER_SANITIZE_STRING);
+        $lastname = filter_var($lastname, FILTER_SANITIZE_STRING);
 
-        // Create salt
-        $salt = \hash('sha512', \bin2hex(\random_bytes(16)));
-        // Create hash
-        $passwordHash = \hash('sha512', $salt . $password);
+        // Create password hash
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
         // Registration date is stored in epoch
-        $registerDate = \time();
+        $registerDate = time();
 
         // get the group for the new user
         if ($group === null) {
-            $teamId = $Teams->getTeamIdFromNameOrOrgid((string) $teams[0]);
-            $group = $UsersHelper->getGroup($teamId);
+            $teamId = (int) $teams[0]['id'];
+            $TeamsHelper = new TeamsHelper($teamId);
+            $group = $TeamsHelper->getGroup();
         }
 
         // will new user be validated?
@@ -120,36 +105,29 @@ class Users
             $validated = 1;
         }
 
-        // make sure that all the teams in which the user will be are created/exist
-        // this might throw an exception if the team doesn't exist and we can't create it on the fly
-        // the $teamIdArr is an array of teams ID
-        $teamIdArr = $Teams->validateTeams($teams);
 
         $sql = 'INSERT INTO users (
             `email`,
-            `password`,
+            `password_hash`,
             `firstname`,
             `lastname`,
             `usergroup`,
-            `salt`,
             `register_date`,
             `validated`,
             `lang`
         ) VALUES (
             :email,
-            :password,
+            :password_hash,
             :firstname,
             :lastname,
             :usergroup,
-            :salt,
             :register_date,
             :validated,
             :lang);';
         $req = $this->Db->prepare($sql);
 
         $req->bindParam(':email', $email);
-        $req->bindParam(':salt', $salt);
-        $req->bindParam(':password', $passwordHash);
+        $req->bindParam(':password_hash', $passwordHash);
         $req->bindParam(':firstname', $firstname);
         $req->bindParam(':lastname', $lastname);
         $req->bindParam(':register_date', $registerDate);
@@ -160,14 +138,18 @@ class Users
         $userid = $this->Db->lastInsertId();
 
         // now add the user to the team
-        $Teams->addUserToTeams($userid, $teamIdArr);
+        $Teams->addUserToTeams($userid, array_column($teams, 'id'));
+        $userInfo = array('email' => $email, 'name' => $firstname . ' ' . $lastname);
+        $Email = new Email($Config, $this);
+        if ($alertAdmin) {
+            // just skip this if we don't have proper normalized teams
+            if (isset($teams[0]['id'])) {
+                $Email->alertAdmin((int) $teams[0]['id'], $userInfo, !(bool) $validated);
+            }
+        }
         if ($validated === 0) {
-            $userInfo = array('email' => $email, 'name' => $firstname . ' ' . $lastname);
-            $Email = new Email($Config, $this);
-            $Email->alertAdmin($teamIdArr[0], $userInfo);
             $Email->alertUserNeedValidation($email);
             // set a flag to show correct message to user
-            // TODO put in session?
             $this->needValidation = true;
         }
         return $userid;
@@ -191,9 +173,6 @@ class Users
 
     /**
      * Get info about a user
-     *
-     * @param int $userid
-     * @return array
      */
     public function read(int $userid): array
     {
@@ -214,11 +193,8 @@ class Users
 
     /**
      * Get users matching a search term for consumption in autocomplete
-     *
-     * @param string $term
-     * @return array
      */
-    public function lookFor(string $term): array
+    public function getList(string $term): array
     {
         $usersArr = $this->readFromQuery($term);
         $res = array();
@@ -230,21 +206,18 @@ class Users
 
     /**
      * Select by email
-     *
-     * @param string $email
-     * @return void
      */
     public function populateFromEmail(string $email): void
     {
         $sql = 'SELECT userid
             FROM users
-            WHERE email = :email AND archived = 0 LIMIT 1';
+            WHERE email = :email AND archived = 0 AND validated = 1 LIMIT 1';
         $req = $this->Db->prepare($sql);
         $req->bindParam(':email', $email);
         $this->Db->execute($req);
         $res = $req->fetchColumn();
         if ($res === false) {
-            throw new ImproperActionException(_('Email not found in database!'));
+            throw new ResourceNotFoundException(_('Email not found in database!'));
         }
         $this->populate((int) $res);
     }
@@ -254,7 +227,6 @@ class Users
      *
      * @param string $query the searched term
      * @param bool $teamFilter toggle between sysadmin/admin view
-     * @return array
      */
     public function readFromQuery(string $query, bool $teamFilter = false): array
     {
@@ -266,7 +238,7 @@ class Users
         // NOTE: previously, the ORDER BY started with the team, but that didn't work
         // with the DISTINCT, so it was removed.
         $sql = "SELECT DISTINCT users.userid,
-            users.firstname, users.lastname, users.email,
+            users.firstname, users.lastname, users.email, users.mfa_secret,
             users.validated, users.usergroup, users.archived, users.last_login,
             CONCAT(users.firstname, ' ', users.lastname) AS fullname
             FROM users
@@ -289,32 +261,21 @@ class Users
 
     /**
      * Read all users from the team
-     *
-     * @param int|null $validated
-     * @return array
      */
-    public function readAllFromTeam(?int $validated = null): array
+    public function readAllFromTeam(): array
     {
-        $valSql = '';
-        if (is_int($validated)) {
-            $valSql = ' users.validated = :validated AND ';
-        }
-
         $sql = "SELECT DISTINCT users.userid, CONCAT (users.firstname, ' ', users.lastname) AS fullname,
             users.email,
             users.phone,
             users.cellphone,
             users.website,
-            users.skype
+            users.skype,
+            users.validated
             FROM users
             CROSS JOIN users2teams ON (users2teams.users_id = users.userid AND users2teams.teams_id = :team)
             LEFT JOIN teams ON (teams.id = :team)
-            WHERE " . $valSql . ' teams.id = :team ORDER BY fullname';
+            WHERE teams.id = :team ORDER BY fullname";
         $req = $this->Db->prepare($sql);
-
-        if (is_int($validated)) {
-            $req->bindValue(':validated', $validated);
-        }
         $req->bindValue(':team', $this->team);
         $this->Db->execute($req);
 
@@ -327,9 +288,6 @@ class Users
 
     /**
      * Get email for every single user
-     *
-     * @param bool $fromTeam
-     * @return array
      */
     public function getAllEmails(bool $fromTeam = false): array
     {
@@ -353,15 +311,21 @@ class Users
     /**
      * Update user from the editusers template
      *
-     * @param array $params POST
-     * @return void
+     * @param array<string, mixed> $params POST
      */
     public function update(array $params): void
     {
         $firstname = Filter::sanitize($params['firstname']);
         $lastname = Filter::sanitize($params['lastname']);
         $email = filter_var($params['email'], FILTER_SANITIZE_EMAIL);
-        $UsersHelper = new UsersHelper();
+
+        // (Sys)admins can only disable 2FA
+        $mfaSql = '';
+        if (!isset($params['use_mfa']) || $params['use_mfa'] === 'off') {
+            $mfaSql = ', mfa_secret = null';
+        } elseif ($params['use_mfa'] === 'on' && !$this->userData['mfa_secret']) {
+            throw new ImproperActionException('Only users themselves can activate two factor authentication!');
+        }
 
         // check email is not already in db
         $usersEmails = $this->getAllEmails();
@@ -384,7 +348,7 @@ class Users
 
         $usergroup = Check::id((int) $params['usergroup']);
 
-        if (\mb_strlen($params['password']) > 1) {
+        if (mb_strlen($params['password']) > 1) {
             $this->updatePassword($params['password']);
         }
 
@@ -393,8 +357,9 @@ class Users
             lastname = :lastname,
             email = :email,
             usergroup = :usergroup,
-            validated = :validated
-            WHERE userid = :userid';
+            validated = :validated';
+        $sql .= $mfaSql;
+        $sql .= ' WHERE userid = :userid';
         $req = $this->Db->prepare($sql);
         $req->bindParam(':firstname', $firstname);
         $req->bindParam(':lastname', $lastname);
@@ -406,149 +371,9 @@ class Users
     }
 
     /**
-     * Update preferences from user control panel
-     *
-     * @param array $params
-     * @return void
-     */
-    public function updatePreferences(array $params): void
-    {
-        // LIMIT
-        $new_limit = Check::limit((int) $params['limit']);
-
-        // DISPLAY SIZE
-        $new_display_size = Check::displaySize($params['display_size']);
-
-        // ORDER BY
-        $new_orderby = null;
-        $whitelistOrderby = array(null, 'cat', 'date', 'title', 'comment', 'lastchange');
-        if (isset($params['orderby']) && in_array($params['orderby'], $whitelistOrderby, true)) {
-            $new_orderby = $params['orderby'];
-        }
-
-        // SORT
-        $new_sort = 'desc';
-        if (isset($params['sort']) && ($params['sort'] === 'asc' || $params['sort'] === 'desc')) {
-            $new_sort = $params['sort'];
-        }
-
-        // LAYOUT
-        $new_layout = Filter::onToBinary($params['single_column_layout'] ?? '');
-
-        // KEYBOARD SHORTCUTS
-        // only take first letter
-        $new_sc_create = $params['sc_create'][0];
-        if (!ctype_alpha($new_sc_create)) {
-            $new_sc_create = 'c';
-        }
-        $new_sc_edit = $params['sc_edit'][0];
-        if (!ctype_alpha($new_sc_edit)) {
-            $new_sc_edit = 'e';
-        }
-        $new_sc_submit = $params['sc_submit'][0];
-        if (!ctype_alpha($new_sc_submit)) {
-            $new_sc_submit = 's';
-        }
-        $new_sc_todo = $params['sc_todo'][0];
-        if (!ctype_alpha($new_sc_todo)) {
-            $new_sc_todo = 't';
-        }
-
-        // SHOW TEAM
-        $new_show_team = Filter::onToBinary($params['show_team'] ?? '');
-        // SHOW TEAM TEMPLATES
-        $new_show_team_templates = Filter::onToBinary($params['show_team_templates'] ?? '');
-        // CJK FONTS
-        $new_cjk_fonts = Filter::onToBinary($params['cjk_fonts'] ?? '');
-        // PDF/A
-        $new_pdfa = Filter::onToBinary($params['pdfa'] ?? '');
-        // PDF format
-        $new_pdf_format = 'A4';
-        $formatsArr = array('A4', 'LETTER', 'ROYAL');
-        if (in_array($params['pdf_format'], $formatsArr, true)) {
-            $new_pdf_format = $params['pdf_format'];
-        }
-
-        // USE MARKDOWN
-        $new_use_markdown = Filter::onToBinary($params['use_markdown'] ?? '');
-        // INCLUDE FILES IN PDF
-        $new_inc_files_pdf = Filter::onToBinary($params['inc_files_pdf'] ?? '');
-        // CHEM EDITOR
-        $new_chem_editor = Filter::onToBinary($params['chem_editor'] ?? '');
-        // JSON EDITOR
-        $new_json_editor = Filter::onToBinary($params['json_editor'] ?? '');
-        // LANG
-        $new_lang = 'en_GB';
-        if (isset($params['lang']) && array_key_exists($params['lang'], Tools::getLangsArr())) {
-            $new_lang = $params['lang'];
-        }
-
-        // DEFAULT READ/WRITE
-        $new_default_read = Check::visibility($params['default_read'] ?? 'team');
-        $new_default_write = Check::visibility($params['default_write'] ?? 'team');
-
-        // Signature pdf
-        // only use cookie here because it's temporary code
-        if (isset($params['pdf_sig']) && $params['pdf_sig'] === 'on') {
-            setcookie('pdf_sig', '1', time() + 2592000, '/', '', true, true);
-        } else {
-            setcookie('pdf_sig', '0', time() - 3600, '/', '', true, true);
-        }
-
-        $sql = 'UPDATE users SET
-            limit_nb = :new_limit,
-            display_size = :new_display_size,
-            orderby = :new_orderby,
-            sort = :new_sort,
-            sc_create = :new_sc_create,
-            sc_edit = :new_sc_edit,
-            sc_submit = :new_sc_submit,
-            sc_todo = :new_sc_todo,
-            show_team = :new_show_team,
-            show_team_templates = :new_show_team_templates,
-            chem_editor = :new_chem_editor,
-            json_editor = :new_json_editor,
-            lang = :new_lang,
-            default_read = :new_default_read,
-            default_write = :new_default_write,
-            single_column_layout = :new_layout,
-            cjk_fonts = :new_cjk_fonts,
-            pdfa = :new_pdfa,
-            pdf_format = :new_pdf_format,
-            use_markdown = :new_use_markdown,
-            inc_files_pdf = :new_inc_files_pdf
-            WHERE userid = :userid;';
-        $req = $this->Db->prepare($sql);
-        $req->bindParam(':new_limit', $new_limit);
-        $req->bindParam(':new_display_size', $new_display_size);
-        $req->bindParam(':new_orderby', $new_orderby);
-        $req->bindParam(':new_sort', $new_sort);
-        $req->bindParam(':new_sc_create', $new_sc_create);
-        $req->bindParam(':new_sc_edit', $new_sc_edit);
-        $req->bindParam(':new_sc_submit', $new_sc_submit);
-        $req->bindParam(':new_sc_todo', $new_sc_todo);
-        $req->bindParam(':new_show_team', $new_show_team);
-        $req->bindParam(':new_show_team_templates', $new_show_team_templates);
-        $req->bindParam(':new_chem_editor', $new_chem_editor);
-        $req->bindParam(':new_json_editor', $new_json_editor);
-        $req->bindParam(':new_lang', $new_lang);
-        $req->bindParam(':new_default_read', $new_default_read);
-        $req->bindParam(':new_default_write', $new_default_write);
-        $req->bindParam(':new_layout', $new_layout);
-        $req->bindParam(':new_cjk_fonts', $new_cjk_fonts);
-        $req->bindParam(':new_pdfa', $new_pdfa);
-        $req->bindParam(':new_pdf_format', $new_pdf_format);
-        $req->bindParam(':new_use_markdown', $new_use_markdown);
-        $req->bindParam(':new_inc_files_pdf', $new_inc_files_pdf);
-        $req->bindParam(':userid', $this->userData['userid'], PDO::PARAM_INT);
-        $this->Db->execute($req);
-    }
-
-    /**
      * Update things from UCP
      *
-     * @param array $params
-     * @return void
+     * @param array<string, mixed> $params
      */
     public function updateAccount(array $params): void
     {
@@ -594,29 +419,22 @@ class Users
 
     /**
      * Update the password for the user
-     *
-     * @param string $password The new password
-     * @return void
      */
     public function updatePassword(string $password): void
     {
         Check::passwordLength($password);
 
-        $salt = \hash('sha512', \bin2hex(\random_bytes(16)));
-        $passwordHash = \hash('sha512', $salt . $password);
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
-        $sql = 'UPDATE users SET salt = :salt, password = :password, token = null WHERE userid = :userid';
+        $sql = 'UPDATE users SET password_hash = :password_hash, token = null WHERE userid = :userid';
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':salt', $salt);
-        $req->bindParam(':password', $passwordHash);
+        $req->bindParam(':password_hash', $passwordHash);
         $req->bindParam(':userid', $this->userData['userid'], PDO::PARAM_INT);
         $this->Db->execute($req);
     }
 
     /**
      * Validate current user instance
-     *
-     * @return void
      */
     public function validate(): void
     {
@@ -631,8 +449,6 @@ class Users
 
     /**
      * Archive/Unarchive a user
-     *
-     * @return void
      */
     public function toggleArchive(): void
     {
@@ -644,8 +460,6 @@ class Users
 
     /**
      * Lock all the experiments owned by user
-     *
-     * @return void
      */
     public function lockExperiments(): void
     {
@@ -659,13 +473,11 @@ class Users
 
     /**
      * Destroy user. Will completely remove everything from the user.
-     *
-     * @return void
      */
     public function destroy(): void
     {
-        $UsersHelper = new UsersHelper();
-        if ($UsersHelper->hasExperiments((int) $this->userData['userid'])) {
+        $UsersHelper = new UsersHelper((int) $this->userData['userid']);
+        if ($UsersHelper->hasExperiments()) {
             throw new ImproperActionException('Cannot delete a user that owns experiments!');
         }
         $sql = 'DELETE FROM users WHERE userid = :userid';

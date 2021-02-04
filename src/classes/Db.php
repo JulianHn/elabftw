@@ -13,20 +13,20 @@ namespace Elabftw\Elabftw;
 use Elabftw\Exceptions\DatabaseErrorException;
 use PDO;
 use PDOException;
+use PDOStatement;
 
 /**
  * Connect to the database with a singleton class
  */
 final class Db
 {
-    /** @var PDO $connection Connection to PDO */
-    private $connection;
+    private PDO $connection;
 
-    /** @var Db|null $instance store the single instance of the class */
-    private static $instance;
+    // store the single instance of the class
+    private static ?Db $instance = null;
 
-    /** @var int $nq total number of queries */
-    private $nq = 0;
+    // total number of queries
+    private int $nq = 0;
 
     /**
      * Construct of a singleton is private
@@ -42,6 +42,9 @@ final class Db
         $pdo_options[PDO::ATTR_PERSISTENT] = true;
         // only return a named array
         $pdo_options[PDO::ATTR_DEFAULT_FETCH_MODE] = PDO::FETCH_ASSOC;
+        if (defined('DB_CERT_PATH') && !empty(\DB_CERT_PATH)) {
+            $pdo_options[PDO::MYSQL_ATTR_SSL_CA] = \DB_CERT_PATH;
+        }
 
         // be backward compatible
         if (!defined('DB_PORT')) {
@@ -92,9 +95,9 @@ final class Db
      * Prepare a query
      *
      * @param string $sql The SQL query
-     * @return \PDOStatement
+     * @return PDOStatement
      */
-    public function prepare(string $sql): \PDOStatement
+    public function prepare(string $sql): PDOStatement
     {
         $this->nq++;
         return $this->connection->prepare($sql);
@@ -103,12 +106,12 @@ final class Db
     /**
      * Execute a prepared statement and throw exception if it doesn't return true
      *
-     * @param \PDOStatement $req
-     * @param array|null $arr
+     * @param PDOStatement $req
+     * @param array<mixed>|null $arr optional array to execute
      *
      * @return bool
      */
-    public function execute(\PDOStatement $req, ?array $arr = null): bool
+    public function execute(PDOStatement $req, ?array $arr = null): bool
     {
         try {
             $res = $req->execute($arr);
@@ -125,9 +128,9 @@ final class Db
      * Make a simple query
      *
      * @param string $sql The SQL query
-     * @return \PDOStatement
+     * @return PDOStatement
      */
-    public function q(string $sql): \PDOStatement
+    public function q(string $sql): PDOStatement
     {
         $res = $this->connection->query($sql);
         if ($res === false) {

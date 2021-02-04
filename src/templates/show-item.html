@@ -2,7 +2,7 @@
       {% set randomId = random() %}
       {% set opacity = '1' %}
       {% set owner = '' %}
-      {% if (Entity.Users.userData.userid != item.userid) and Entity.type == 'experiments' and not App.Session.has('anon') %}
+      {% if (Entity.Users.userData.userid != item.userid) and not App.Session.has('is_anon') %}
         {% set opacity = '0.7' %}
         {% set owner = item.fullname %}
       {% endif %}
@@ -11,12 +11,13 @@
       {% else %}
         <div class='col-xs-12 col-sm-6 col-md-6 col-lg-4'>
       {% endif %}
-          <section class='item item-show item-show-{{ App.Users.userData.display_size }} {{ loop.last ? 'item-show-last' }}' id='parent_{{ randomId }}' style='opacity:{{ opacity }}; border-left: 6px solid #{{ item.color }}'>
+          <section class='item item-show item-show-{{ App.Users.userData.display_size }} {{ loop.last ? 'item-show-last' }}' id='parent_{{ randomId }}' style='--opacity:{{ opacity }}; --left-color: #{{ item.color }};'>
               {% if isPinned %}
-                <span class='align_right'><i class='fas fa-thumbtack' title="{{ 'Pinned'|trans }}"></i></span>
+                <span class='align-right'><i class='fas fa-thumbtack' title="{{ 'Pinned'|trans }}"></i></span>
               {% endif %}
 
             <p class='title'>
+              <!-- lock icon -->
               {% if item.locked %}
                 <i class='fas fa-lock fa-sm' style='color:#29AEB9'></i>
               {% endif %}
@@ -33,15 +34,15 @@
 
             <p class='item-info'>
               <!-- checkbox -->
-              <input class='item-checkbox' type='checkbox' data-id='{{ item.id }}' data-randomid='{{ randomId }}' data-type='{{ Entity.type }}' autocomplete='off' aria-label='Select' style='width:15px;vertical-align:-3px;' />
+              <input class='item-checkbox' autocomplete='off' type='checkbox' data-id='{{ item.id }}' data-randomid='{{ randomId }}' data-type='{{ Entity.type }}' aria-label='Select' style='width:15px;vertical-align:-3px;' />
+              <!-- edit icon -->
+              {% if not item.locked and (item.userid == App.Users.userData.userid or Entity.type == 'items' or App.Session.get('is_admin')) %}
+                <a href='{{ Entity.page }}.php?mode=edit&id={{ item.id }}'><i class='fas fa-pencil-alt clickable link-like'></i></a>
+              {% endif %}
               <!-- toggle body -->
               <span data-type='{{ Entity.type }}' data-id='{{ item.id }}' data-randid={{ randomId }} class='toggleBody clickable'>
                 <i class='fas fa-plus-circle' title='{{ 'Toggle content'|trans }}'></i>
               </span>
-              <!-- lock icon -->
-              {% if not item.locked and (item.userid == App.Users.userData.userid or Entity.type == 'items' or App.Session.get('is_admin')) %}
-                <a href='{{ Entity.page }}.php?mode=edit&id={{ item.id }}'><i class='fas fa-pencil-alt clickable link-like'></i></a>
-              {% endif %}
               <!-- category -->
               <span class='item-category' style='color:#{{ item.color }}'>{{ item.category }}</span>
               <!-- date -->
@@ -69,7 +70,7 @@
               {% if itemtagsArr|length > 0 %}
                 <span class='tags'><i class='fas fa-tags mr-1'></i>
                   {% for tag in itemtagsArr %}
-                    <a class='tag' href='{{ Entity.page }}.php?mode=show&tags[]={{ tag.tag|url_encode }}'>{{ tag.tag|raw }}</a>
+                    <a class='tag' href='{{ Entity.page }}.php?mode=show&tags%5B%5D={{ tag.tag|url_encode }}'>{{ tag.tag|raw }}</a>
                   {% endfor %}
                 </span>
               {% endif %}

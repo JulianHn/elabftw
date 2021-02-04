@@ -1,4 +1,4 @@
-<?php declare(strict_types=1);
+<?php
 /**
  * @author Nicolas CARPi <nico-git@deltablot.email>
  * @copyright 2012 Nicolas CARPi
@@ -6,10 +6,12 @@
  * @license AGPL-3.0
  * @package elabftw
  */
+declare(strict_types=1);
 
 namespace Elabftw\Commands;
 
 use Defuse\Crypto\Key;
+use function dirname;
 use Elabftw\Services\DatabaseInstaller;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -40,7 +42,7 @@ class Install extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $fs = new Filesystem();
-        $elabRoot = \dirname(__DIR__, 2);
+        $elabRoot = dirname(__DIR__, 2);
         $configFilePath = $elabRoot . '/config.php';
         $cacheDir = $elabRoot . '/cache';
         $uploadsDir = $elabRoot . '/uploads';
@@ -102,7 +104,7 @@ class Install extends Command
         }
 
         if (!$fs->exists($configFilePath)) {
-            $output->writeln('✓ All preliminary checks suceeded. Now asking information to produce the config.php file.');
+            $output->writeln('✓ All preliminary checks succeeded. Now asking information to produce the config.php file.');
             $output->writeln('<comment>The value between brackets is the default value entered if you just press enter.</comment>');
             // ask for authentication credentials
             $helper = $this->getHelper('question');

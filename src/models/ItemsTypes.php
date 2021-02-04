@@ -11,9 +11,8 @@ declare(strict_types=1);
 namespace Elabftw\Models;
 
 use Elabftw\Elabftw\Db;
+use Elabftw\Elabftw\ParamsProcessor;
 use Elabftw\Exceptions\ImproperActionException;
-use Elabftw\Services\Check;
-use Elabftw\Services\Filter;
 use Elabftw\Traits\EntityTrait;
 use PDO;
 
@@ -24,15 +23,6 @@ class ItemsTypes extends AbstractCategory
 {
     use EntityTrait;
 
-    /** @var array $filters an array of arrays with filters for sql query */
-    private $filters;
-
-    /**
-     * Constructor
-     *
-     * @param Users $users
-     * @param int|null $id
-     */
     public function __construct(Users $users, ?int $id = null)
     {
         $this->Db = Db::getConnection();
@@ -40,49 +30,31 @@ class ItemsTypes extends AbstractCategory
         if ($id !== null) {
             $this->setId($id);
         }
-        $this->filters = array();
     }
 
-    /**
-     * Create an item type
-     *
-     * @param string $name New name
-     * @param string $color hexadecimal color code
-     * @param int $bookable
-     * @param string $template html for new body
-     * @param int|null $team
-     * @return void
-     */
-    public function create(string $name, string $color, int $bookable, string $template, ?int $team = null): void
+    public function create(ParamsProcessor $params, ?int $team = null): int
     {
         if ($team === null) {
             $team = $this->Users->userData['team'];
         }
 
-        $name = filter_var($name, FILTER_SANITIZE_STRING);
-        if ($name === '') {
-            $name = 'Unnamed';
-        }
-        $color = Check::color($color);
-        $template = Filter::body($template);
-
         $sql = 'INSERT INTO items_types(name, color, bookable, template, team)
             VALUES(:name, :color, :bookable, :template, :team)';
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':name', $name);
-        $req->bindParam(':color', $color);
-        $req->bindParam(':bookable', $bookable);
-        $req->bindParam(':template', $template);
+        $req->bindParam(':name', $params->name, PDO::PARAM_STR);
+        $req->bindParam(':color', $params->color, PDO::PARAM_STR);
+        $req->bindParam(':bookable', $params->bookable, PDO::PARAM_INT);
+        $req->bindParam(':template', $params->template, PDO::PARAM_STR);
         $req->bindParam(':team', $team, PDO::PARAM_INT);
         $this->Db->execute($req);
+
+        return $this->Db->lastInsertId();
     }
 
     /**
      * Read the body (template) of the item_type from an id
-     *
-     * @return string
      */
-    public function read(): string
+    public function read(): array
     {
         $sql = 'SELECT template FROM items_types WHERE id = :id AND team = :team';
         $req = $this->Db->prepare($sql);
@@ -94,11 +66,11 @@ class ItemsTypes extends AbstractCategory
             throw new ImproperActionException(_('Nothing to show with this id'));
         }
 
-        $res = $req->fetchColumn();
+        $res = $req->fetch();
         if ($res === false || $res === null) {
-            return '';
+            return array();
         }
-        return (string) $res;
+        return $res;
     }
 
     /**
@@ -130,7 +102,6 @@ class ItemsTypes extends AbstractCategory
      * Get the color of an item type
      *
      * @param int $id ID of the category
-     * @return string
      */
     public function readColor(int $id): string
     {
@@ -148,19 +119,9 @@ class ItemsTypes extends AbstractCategory
 
     /**
      * Update an item type
-     *
-     * @param int $id The ID of the item type
-     * @param string $name name
-     * @param string $color hexadecimal color
-     * @param int $bookable
-     * @param string $template html for the body
-     * @return void
      */
-    public function update(int $id, string $name, string $color, int $bookable, string $template): void
+    public function update(ParamsProcessor $params): string
     {
-        $name = filter_var($name, FILTER_SANITIZE_STRING);
-        $color = Check::color($color);
-        $template = Filter::body($template);
         $sql = 'UPDATE items_types SET
             name = :name,
             team = :team,
@@ -169,22 +130,22 @@ class ItemsTypes extends AbstractCategory
             template = :template
             WHERE id = :id';
         $req = $this->Db->prepare($sql);
-        $req->bindParam(':name', $name);
-        $req->bindParam(':color', $color);
-        $req->bindParam(':bookable', $bookable);
-        $req->bindParam(':template', $template);
+        $req->bindParam(':name', $params->name, PDO::PARAM_STR);
+        $req->bindParam(':color', $params->color, PDO::PARAM_STR);
+        $req->bindParam(':bookable', $params->bookable, PDO::PARAM_INT);
+        $req->bindParam(':template', $params->template, PDO::PARAM_STR);
         $req->bindParam(':team', $this->Users->userData['team'], PDO::PARAM_INT);
-        $req->bindParam(':id', $id, PDO::PARAM_INT);
+        $req->bindParam(':id', $params->id, PDO::PARAM_INT);
         $this->Db->execute($req);
+
+        return $params->template;
     }
 
     /**
      * Destroy an item type
      *
-     * @param int $id
-     * @return void
      */
-    public function destroy(int $id): void
+    public function destroy(int $id): bool
     {
         // don't allow deletion of an item type with items
         if ($this->countItems($id) > 0) {
@@ -194,16 +155,7 @@ class ItemsTypes extends AbstractCategory
         $req = $this->Db->prepare($sql);
         $req->bindParam(':id', $id, PDO::PARAM_INT);
         $req->bindParam(':team', $this->Users->userData['team'], PDO::PARAM_INT);
-        $this->Db->execute($req);
-    }
-
-    /**
-     * Not implemented
-     *
-     * @return void
-     */
-    public function destroyAll(): void
-    {
+        return $this->Db->execute($req);
     }
 
     /**

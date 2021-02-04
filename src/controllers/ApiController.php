@@ -10,6 +10,9 @@ declare(strict_types=1);
 
 namespace Elabftw\Controllers;
 
+use Elabftw\Elabftw\App;
+use Elabftw\Elabftw\DisplayParams;
+use Elabftw\Elabftw\ParamsProcessor;
 use Elabftw\Exceptions\IllegalActionException;
 use Elabftw\Exceptions\ImproperActionException;
 use Elabftw\Exceptions\ResourceNotFoundException;
@@ -38,47 +41,37 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class ApiController implements ControllerInterface
 {
-    /** @var Request $Request instance of Request */
-    private $Request;
+    private App $App;
 
-    /** @var AbstractCategory $Category instance of ItemsTypes or Status
-     * @psalm-suppress PropertyNotSetInConstructor */
-    private $Category;
+    private Request $Request;
 
-    /** @var AbstractEntity $Entity instance of Entity
-     * @psalm-suppress PropertyNotSetInConstructor */
-    private $Entity;
+    /** @psalm-suppress PropertyNotSetInConstructor */
+    private AbstractCategory $Category;
 
-    /** @var Scheduler $Scheduler instance of Scheduler
-     * @psalm-suppress PropertyNotSetInConstructor */
-    private $Scheduler;
+    /** @psalm-suppress PropertyNotSetInConstructor */
+    private AbstractEntity $Entity;
 
-    /** @var Users $Users the authenticated user */
-    private $Users;
+    /** @psalm-suppress PropertyNotSetInConstructor */
+    private Scheduler $Scheduler;
 
-    /** @var array $allowedMethods allowed HTTP methods */
-    private $allowedMethods = array('GET', 'POST', 'DELETE');
+    private Users $Users;
 
-    /** @var bool $canWrite can we do POST methods? */
-    private $canWrite = false;
+    private array $allowedMethods = array('GET', 'POST', 'DELETE');
 
-    /** @var int|null $id the id at the end of the url */
-    private $id;
+    private bool $canWrite = false;
 
-    /** @var string $endpoint experiments, items or uploads */
-    private $endpoint;
+    private ?int $id;
 
-    /** @var string $param used by backupzip to get the period */
-    private $param;
+    // experiments, items or uploads
+    private string $endpoint;
 
-    /**
-     * Constructor
-     *
-     * @param Request $request
-     */
-    public function __construct(Request $request)
+    // used by backupzip to get the period
+    private string $param;
+
+    public function __construct(App $app)
     {
-        $this->Request = $request;
+        $this->App = $app;
+        $this->Request = $app->Request;
         // Check if the Authorization Token was sent along
         if (!$this->Request->server->has('HTTP_AUTHORIZATION')) {
             throw new UnauthorizedException('No access token provided!');
@@ -146,6 +139,11 @@ class ApiController implements ControllerInterface
                     return $this->createLink();
                 }
 
+                // CHANGE CATEGORY
+                if ($this->Request->request->has('category')) {
+                    return $this->updateCategory();
+                }
+
                 if ($this->endpoint === 'events') {
                     return $this->createEvent();
                 }
@@ -177,7 +175,7 @@ class ApiController implements ControllerInterface
      */
     private function parseReq(): void
     {
-        $args = explode('/', rtrim($this->Request->query->get('req'), '/'));
+        $args = explode('/', rtrim($this->Request->query->get('req') ?? '', '/'));
 
         // assign the id if there is one
         $id = null;
@@ -318,15 +316,20 @@ class ApiController implements ControllerInterface
     private function getEntity(): Response
     {
         if ($this->id === null) {
-            return new JsonResponse($this->Entity->readShow(true));
+            $DisplayParams = new DisplayParams();
+            $DisplayParams->adjust($this->App);
+            // default DisplayParams is 16, crank it up to 9000
+            // in the future maybe use limit/offset/page query params
+            $DisplayParams->limit = 9000;
+            return new JsonResponse($this->Entity->readShow($DisplayParams, true));
         }
         $this->Entity->canOrExplode('read');
         // add the uploaded files
         $this->Entity->entityData['uploads'] = $this->Entity->Uploads->readAll();
         // add the linked items
-        $this->Entity->entityData['links'] = $this->Entity->Links->readAll();
+        $this->Entity->entityData['links'] = $this->Entity->Links->read();
         // add the steps
-        $this->Entity->entityData['steps'] = $this->Entity->Steps->readAll();
+        $this->Entity->entityData['steps'] = $this->Entity->Steps->read();
 
         return new JsonResponse($this->Entity->entityData);
     }
@@ -604,7 +607,8 @@ class ApiController implements ControllerInterface
         if ($this->Entity instanceof Database) {
             return new Response('Creating database items is not supported.', 400);
         }
-        $id = $this->Entity->create(0);
+        $params = new ParamsProcessor(array('id' => 0));
+        $id = $this->Entity->create($params);
         return new JsonResponse(array('result' => 'success', 'id' => $id));
     }
 
@@ -652,7 +656,8 @@ class ApiController implements ControllerInterface
         if ($this->id === null) {
             return new Response('Invalid id', 400);
         }
-        $id = $this->Entity->create($this->id);
+        $params = new ParamsProcessor(array('id' => $this->id));
+        $id = $this->Entity->create($params);
         return new JsonResponse(array('result' => 'success', 'id' => $id));
     }
 
@@ -687,7 +692,7 @@ class ApiController implements ControllerInterface
      */
     private function createLink(): Response
     {
-        $this->Entity->Links->create((int) $this->Request->request->get('link'));
+        $this->Entity->Links->create(new ParamsProcessor(array('id' => (int) $this->Request->request->get('link'))));
         return new JsonResponse(array('result' => 'success'));
     }
 
@@ -713,7 +718,7 @@ class ApiController implements ControllerInterface
      * # add tag "some-tag" to database item 42
      * curl -X POST -F "tag=some-tag" -H "Authorization: $TOKEN" https://elab.example.org/api/v1/items/42
      * @apiSuccess {String} result Success
-     * @apiError {String} error Error mesage
+     * @apiError {String} error Error message
      * @apiParamExample {Json} Request-Example:
      *     {
      *       "tag": "my tag"
@@ -727,7 +732,7 @@ class ApiController implements ControllerInterface
      */
     private function createTag(): Response
     {
-        $this->Entity->Tags->create($this->Request->request->get('tag'));
+        $this->Entity->Tags->create(new ParamsProcessor(array('tag' => $this->Request->request->get('tag') ?? '')));
         return new JsonResponse(array('result' => 'success'));
     }
 
@@ -736,7 +741,7 @@ class ApiController implements ControllerInterface
      * @apiName AddEvent
      * @apiGroup Events
      * @apiDescription Create an event in the scheduler for an item
-     * @apiParam {Sring} start Start time
+     * @apiParam {String} start Start time
      * @apiParam {Number} end End time
      * @apiParam {String} title Comment for the booking
      * @apiExample {python} Python example
@@ -755,7 +760,7 @@ class ApiController implements ControllerInterface
      * curl -X POST -F "start=2019-11-30T12:00:00" -F "end=2019-11-30T14:00:00" -F "title=Booked from API" -H "Authorization: $TOKEN" https://elab.example.org/api/v1/events/42
      * @apiSuccess {String} result Success
      * @apiSuccess {String} id Id of new event
-     * @apiError {Number} error Error mesage
+     * @apiError {Number} error Error message
      * @apiParamExample {Json} Request-Example:
      *     {
      *       "start": "2019-11-30T12:00:00",
@@ -776,9 +781,9 @@ class ApiController implements ControllerInterface
         }
         $this->Entity->setId($this->id);
         $id = $this->Scheduler->create(
-            $this->Request->request->get('start'),
-            $this->Request->request->get('end'),
-            $this->Request->request->get('title'),
+            $this->Request->request->get('start') ?? '',
+            $this->Request->request->get('end') ?? '',
+            $this->Request->request->get('title') ?? '',
         );
         return new JsonResponse(array('result' => 'success', 'id' => $id));
     }
@@ -799,7 +804,7 @@ class ApiController implements ControllerInterface
      * # destroy event with id 13
      * curl -X DELETE -H "Authorization: $TOKEN" https://elab.example.org/api/v1/events/13
      * @apiSuccess {String} result Success
-     * @apiError {String} error Error mesage
+     * @apiError {String} error Error message
      */
 
     /**
@@ -841,7 +846,7 @@ class ApiController implements ControllerInterface
      * # update database item 42
      * curl -X POST -F "title=a new title" -F "body=a new body" -F "date=20200504" -H "Authorization: $TOKEN" https://elab.example.org/api/v1/items/42
      * @apiSuccess {String} result Success
-     * @apiError {String} error Error mesage
+     * @apiError {String} error Error message
      * @apiParamExample {Json} Request-Example:
      *     {
      *       "body": "New body to be updated.",
@@ -858,10 +863,50 @@ class ApiController implements ControllerInterface
     private function updateEntity(): Response
     {
         $this->Entity->update(
-            $this->Request->request->get('title'),
-            $this->Request->request->get('date'),
-            $this->Request->request->get('body')
+            $this->Request->request->get('title') ?? 'Untitled',
+            $this->Request->request->get('date') ?? '',
+            $this->Request->request->get('body') ?? '',
         );
+        return new JsonResponse(array('result' => 'success'));
+    }
+
+    /**
+     * @api {post} /:endpoint/:id Update category
+     * @apiName UpdateCategory
+     * @apiGroup Entity
+     * @apiParam {String} endpoint 'experiments' or 'items'
+     * @apiParam {Number} id Entity id
+     * @apiParam {Number} category for items the item type id, for experiments the status id
+     * @apiExample {python} Python example
+     * import elabapy
+     * manager = elabapy.Manager(endpoint="https://elab.example.org/api/v1/", token="3148")
+     * # update status of experiment 42
+     * params = { "category": "2" }
+     * print(manager.post_experiment(42, params))
+     * # update database item 42
+     * print(manager.post_item(42, params))
+     * @apiExample {shell} Curl example
+     * export TOKEN="3148"
+     * # update experiment 42
+     * curl -X POST -F "category=2" -H "Authorization: $TOKEN" https://elab.example.org/api/v1/experiments/42
+     * # update database item 42
+     * curl -X POST -F "category=2" -H "Authorization: $TOKEN" https://elab.example.org/api/v1/items/42
+     * @apiSuccess {String} result Success
+     * @apiError {String} error Error message
+     * @apiParamExample {Json} Request-Example:
+     *     {
+     *       "category": "2"
+     *     }
+     */
+
+    /**
+     * Update experiment or item (title, date and body)
+     *
+     * @return Response
+     */
+    private function updateCategory(): Response
+    {
+        $this->Entity->updateCategory((int) $this->Request->request->get('category'));
         return new JsonResponse(array('result' => 'success'));
     }
 
@@ -890,7 +935,7 @@ class ApiController implements ControllerInterface
      * # upload your-file.jpg to database item 42
      * curl -X POST -F "file=@your-file.jpg" -H "Authorization: $TOKEN" "https://elab.example.org/api/v1/items/42"
      * @apiSuccess {String} result Success
-     * @apiError {String} error Error mesage
+     * @apiError {String} error Error message
      */
 
     /**

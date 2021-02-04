@@ -24,6 +24,7 @@ use Elabftw\Models\Teams;
 use GuzzleHttp\Exception\RequestException;
 use function hash_file;
 use function is_readable;
+use function mb_strlen;
 use Monolog\Handler\ErrorLogHandler;
 use Monolog\Logger;
 use PDO;
@@ -41,39 +42,33 @@ class MakeTimestamp extends AbstractMake
     /** default hash algo for file */
     private const HASH_ALGORITHM = 'sha256';
 
-    /** @var Experiments $Entity instance of Experiments */
+    /** @var Experiments $Entity */
     protected $Entity;
 
-    /** @var Config $Config instance of Config */
-    private $Config;
+    private Config $Config;
 
-    /** @var string $pdfPath full path to pdf */
-    private $pdfPath = '';
+    private string $pdfPath = '';
 
-    /** @var string $pdfRealName name of the pdf (elabid-timestamped.pdf) */
-    private $pdfRealName = '';
+    // name of the pdf (elabid-timestamped.pdf)
+    private string $pdfRealName = '';
 
-    /** @var string $pdfLongName a hash */
-    private $pdfLongName = '';
+    // a random long string
+    private string $pdfLongName = '';
 
-    /** @var array $stampParams config (url, login, password, cert) */
-    private $stampParams = array();
+    // config (url, login, password, cert)
+    private array $stampParams = array();
 
-    /** @var array $trash things that get deleted with destruct method */
-    private $trash = array();
+    // things that get deleted with destruct method
+    private array $trash = array();
 
-    /** @var string $requestfilePath where we store the request file */
-    private $requestfilePath = '';
+    // where we store the request file
+    private string $requestfilePath = '';
 
-    /** @var string $responsefilePath where we store the asn1 token */
-    private $responsefilePath = '';
+    // where we store the asn1 token
+    private string $responsefilePath = '';
 
     /**
-     * Pdf is generated on instanciation and after you need to call timestamp()
-     *
-     * @param Config $config
-     * @param Teams $teams
-     * @param Experiments $entity
+     * Pdf is generated on instantiation and after you need to call timestamp()
      */
     public function __construct(Config $config, Teams $teams, Experiments $entity)
     {
@@ -243,7 +238,7 @@ class MakeTimestamp extends AbstractMake
         $teamConfigArr = $teams->read();
         // if there is a config in the team, use that
         // otherwise use the general config if we can
-        if (\mb_strlen($teamConfigArr['stampprovider'] ?? '') > 2) {
+        if (mb_strlen($teamConfigArr['stampprovider'] ?? '') > 2) {
             $config = $teamConfigArr;
         } elseif ($this->Config->configArr['stampshare']) {
             $config = $this->Config->configArr;
@@ -284,7 +279,7 @@ class MakeTimestamp extends AbstractMake
     /**
      * Run a process
      *
-     * @param array $args arguments including the executable
+     * @param array<string> $args arguments including the executable
      * @param string|null $cwd command working directory
      * @return string
      */
@@ -433,10 +428,11 @@ class MakeTimestamp extends AbstractMake
      */
     private function getHash($file): string
     {
-        if (!is_readable($file)) {
+        $hash = hash_file($this->stampParams['hash'], $file);
+        if ($hash === false) {
             throw new ImproperActionException('The file is not readable.');
         }
-        return hash_file($this->stampParams['hash'], $file);
+        return $hash;
     }
 
     /**

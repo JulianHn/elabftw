@@ -10,22 +10,16 @@ declare(strict_types=1);
 
 namespace Elabftw\Models;
 
+use Elabftw\Elabftw\ParamsProcessor;
 use Elabftw\Exceptions\IllegalActionException;
-use Elabftw\Interfaces\CreateInterface;
 use Elabftw\Services\Filter;
 use PDO;
 
 /**
  * All about the database items
  */
-class Database extends AbstractEntity implements CreateInterface
+class Database extends AbstractEntity
 {
-    /**
-     * Constructor
-     *
-     * @param Users $users
-     * @param int|null $id id of the item
-     */
     public function __construct(Users $users, ?int $id = null)
     {
         parent::__construct($users, $id);
@@ -33,15 +27,11 @@ class Database extends AbstractEntity implements CreateInterface
         $this->page = 'database';
     }
 
-    /**
-     * Create an item
-     *
-     * @param int $category What kind of item we want to create.
-     * @return int the new id of the item
-     */
-    public function create(int $category): int
+    public function create(ParamsProcessor $params): int
     {
+        $category = $params->id;
         $itemsTypes = new ItemsTypes($this->Users, $category);
+        $body = $itemsTypes->read();
 
         // SQL for create DB item
         $sql = 'INSERT INTO items(team, title, date, body, userid, category)
@@ -51,7 +41,7 @@ class Database extends AbstractEntity implements CreateInterface
             'team' => $this->Users->userData['team'],
             'title' => _('Untitled'),
             'date' => Filter::kdate(),
-            'body' => $itemsTypes->read(),
+            'body' => $body['template'],
             'userid' => $this->Users->userData['userid'],
             'category' => $category,
         ));
@@ -59,12 +49,6 @@ class Database extends AbstractEntity implements CreateInterface
         return $this->Db->lastInsertId();
     }
 
-    /**
-     * Update the rating of an item
-     *
-     * @param int $rating
-     * @return void
-     */
     public function updateRating(int $rating): void
     {
         $this->canOrExplode('write');
@@ -110,11 +94,6 @@ class Database extends AbstractEntity implements CreateInterface
         return $newId;
     }
 
-    /**
-     * Destroy a DB item
-     *
-     * @return void
-     */
     public function destroy(): void
     {
         $this->canOrExplode('write');
@@ -144,6 +123,6 @@ class Database extends AbstractEntity implements CreateInterface
         }
 
         // delete from pinned
-        $this->rmFromPinned();
+        $this->Pins->cleanup();
     }
 }

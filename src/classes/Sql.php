@@ -10,20 +10,17 @@ declare(strict_types=1);
 
 namespace Elabftw\Elabftw;
 
+use function dirname;
 use Elabftw\Exceptions\FilesystemErrorException;
+use function file;
 
 /**
  * For SQL operations from files
  */
 class Sql
 {
-    /** @var Db $Db SQL Database */
-    private $Db;
+    private Db $Db;
 
-    /**
-     * Constructor
-     *
-     */
     public function __construct()
     {
         $this->Db = Db::getConnection();
@@ -31,17 +28,14 @@ class Sql
 
     /**
      * Read a SQL file from src/sql folder and execute the contents
-     *
-     * @param string $filename
-     * @return void
      */
     public function execFile(string $filename): void
     {
-        $path = \dirname(__DIR__) . '/sql/' . $filename;
+        $path = dirname(__DIR__) . '/sql/' . $filename;
         // temporary variable, used to store current query
         $queryline = '';
         // read in entire file as array
-        $lines = \file($path);
+        $lines = file($path);
         if ($lines === false) {
             throw new FilesystemErrorException('Error reading file: ' . $path);
         }

@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 namespace Elabftw\Elabftw;
 
+use function dirname;
 use Elabftw\Exceptions\IllegalActionException;
 use Elabftw\Exceptions\ImproperActionException;
 use Elabftw\Exceptions\InvalidCsrfTokenException;
@@ -20,14 +21,16 @@ use Elabftw\Models\ItemsTypes;
 use Elabftw\Models\Status;
 use Elabftw\Models\Templates;
 use Elabftw\Services\Check;
+use Elabftw\Services\ListBuilder;
 use Exception;
+use function mb_convert_encoding;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 /**
  * Deal with things common to experiments and items like tags, uploads, quicksave and lock
  *
  */
-require_once \dirname(__DIR__) . '/init.inc.php';
+require_once dirname(__DIR__) . '/init.inc.php';
 
 $Response = new JsonResponse();
 $Response->setData(array(
@@ -64,8 +67,15 @@ try {
 
     // GET MENTION LIST
     if ($Request->query->has('term') && $Request->query->has('mention')) {
-        $term = $Request->query->filter('term', null, FILTER_SANITIZE_STRING);
-        $Response->setData($Entity->getMentionList($term));
+        $term = $Request->query->get('term');
+        $ExperimentsHelper = new ListBuilder(new Experiments($App->Users));
+        $DatabaseHelper = new ListBuilder(new Database($App->Users));
+        // return list of itemd and experiments
+        $mentionArr = array_merge($DatabaseHelper->getMentionList($term), $ExperimentsHelper->getMentionList($term));
+        // fix issue with Malformed UTF-8 characters, possibly incorrectly encoded
+        // see #2404
+        $mentionArr = mb_convert_encoding($mentionArr, 'UTF-8', 'UTF-8'); // @phpstan-ignore-line
+        $Response->setData($mentionArr);
     }
 
     // GET BODY
@@ -83,9 +93,17 @@ try {
 
     // GET LINK LIST
     if ($Request->query->has('term') && !$Request->query->has('mention')) {
-        // we don't care about the entity type as getAutocomplete() is available in AbstractEntity
-        $Entity = new Experiments($App->Users);
-        $Response->setData($Entity->getAutocomplete($Request->query->get('term'), $Request->query->get('source')));
+        // bind autocomplete targets the experiments
+        if ($Request->query->get('source') === 'experiments') {
+            $Entity = new Experiments($App->Users);
+        } else {
+            $Entity = new Database($App->Users);
+        }
+        $ListBuilder = new ListBuilder($Entity);
+        // fix issue with Malformed UTF-8 characters, possibly incorrectly encoded
+        // see #2404
+        $responseArr = $ListBuilder->getAutocomplete($Request->query->get('term'));
+        $Response->setData(mb_convert_encoding($responseArr, 'UTF-8', 'UTF-8'));
     }
 
     // GET BOUND EVENTS
@@ -105,45 +123,27 @@ try {
 
     // SAVE AS IMAGE
     if ($Request->request->has('saveAsImage')) {
-        if ($App->Session->has('anon')) {
-            throw new IllegalActionException('Anonymous user tried to access database controller.');
-        }
         $Entity->Uploads->createFromString('png', $Request->request->get('realName'), $Request->request->get('content'));
     }
 
     // TOGGLE PIN
     if ($Request->request->has('togglePin')) {
-        $Entity->togglePin();
-    }
-
-    // CREATE STEP
-    if ($Request->request->has('createStep')) {
-        $Entity->Steps->create($Request->request->get('body'));
-    }
-
-    // FINISH STEP
-    if ($Request->request->has('finishStep')) {
-        $Entity->Steps->finish((int) $Request->request->get('stepId'));
-    }
-
-    // DESTROY STEP
-    if ($Request->request->has('destroyStep')) {
-        $Entity->Steps->destroy((int) $Request->request->get('stepId'));
-    }
-
-    // CREATE LINK
-    if ($Request->request->has('createLink')) {
-        $Entity->Links->create((int) $Request->request->get('linkId'));
-    }
-
-    // DESTROY LINK
-    if ($Request->request->has('destroyLink')) {
-        $Entity->Links->destroy((int) $Request->request->get('linkId'));
+        $Entity->Pins->togglePin();
     }
 
     // UPDATE VISIBILITY
     if ($Request->request->has('updatePermissions')) {
         $Entity->updatePermissions($Request->request->get('rw'), $Request->request->get('value'));
+    }
+
+    // UPDATE TITLE
+    if ($Request->request->has('updateTitle')) {
+        $Entity->updateTitle($Request->request->get('title'));
+    }
+
+    // UPDATE DATE
+    if ($Request->request->has('updateDate')) {
+        $Entity->updateDate($Request->request->get('date'));
     }
 
     // UPDATE RATING
@@ -204,40 +204,32 @@ try {
 
     // CREATE UPLOAD
     if ($Request->request->has('upload')) {
-        if ($App->Session->has('anon')) {
-            throw new IllegalActionException('Anonymous user tried to access database controller.');
-        }
         $Entity->Uploads->create($Request);
     }
 
     // REPLACE UPLOAD
     if ($Request->request->has('replace')) {
-        if ($App->Session->has('anon')) {
-            throw new IllegalActionException('Anonymous user tried to access database controller.');
-        }
         $Entity->Uploads->replace($Request);
     }
 
     // ADD MOL FILE OR PNG
     if ($Request->request->has('addFromString')) {
-        if ($App->Session->has('anon')) {
-            throw new IllegalActionException('Anonymous user tried to access database controller.');
-        }
-        $Entity->Uploads->createFromString(
+        $uploadId = $Entity->Uploads->createFromString(
             $Request->request->get('fileType'),
             $Request->request->get('realName'),
             $Request->request->get('string')
         );
+        $Response->setData(array(
+            'res' => true,
+            'msg' => _('File uploaded successfully'),
+            'uploadId' => $uploadId,
+        ));
     }
 
     // DESTROY ENTITY
     if ($Request->request->has('destroy')) {
-        if ($App->Session->has('anon')) {
-            throw new IllegalActionException('Anonymous user tried to access database controller.');
-        }
-
         // check for deletable xp
-        if ($Entity instanceof Experiments && (!$App->teamConfigArr['deletable_xp'] && !$Session->get('is_admin')
+        if ($Entity instanceof Experiments && (!$App->teamConfigArr['deletable_xp'] && !$App->Session->get('is_admin')
             || $App->Config->configArr['deletable_xp'] === '0')) {
             throw new ImproperActionException('You cannot delete experiments!');
         }
@@ -260,12 +252,8 @@ try {
         ));
     }
 
-
     // DESTROY UPLOAD
     if ($Request->request->has('uploadsDestroy')) {
-        if ($App->Session->has('anon')) {
-            throw new IllegalActionException('Anonymous user tried to access database controller.');
-        }
         $upload = $Entity->Uploads->readFromId((int) $Request->request->get('uploadId'));
         $Entity->Uploads->destroy((int) $Request->request->get('uploadId'));
         // check that the filename is not in the body. see #432

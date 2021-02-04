@@ -1,13 +1,12 @@
-<?php declare(strict_types=1);
+<?php
 /**
- * login.php
- *
  * @author Nicolas CARPi <nico-git@deltablot.email>
  * @copyright 2012 Nicolas CARPi
  * @see https://www.elabftw.net Official website
  * @license AGPL-3.0
  * @package elabftw
  */
+declare(strict_types=1);
 
 namespace Elabftw\Elabftw;
 
@@ -18,7 +17,12 @@ use Elabftw\Exceptions\ImproperActionException;
 use Elabftw\Models\BannedUsers;
 use Elabftw\Models\Idps;
 use Elabftw\Models\Teams;
+use Elabftw\Services\MfaHelper;
 use Exception;
+use function implode;
+use function in_array;
+use function md5;
+use function str_split;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -33,50 +37,6 @@ $Response = new Response();
 $Response->prepare($Request);
 
 try {
-    // Check if already logged in
-    if ($Session->has('auth') || $Session->has('anon')) {
-        $Response = new RedirectResponse('experiments.php');
-        $Response->send();
-        exit;
-    }
-
-    // Check for external authentication by web server
-    $remote_user_attr = $App->Config->configArr['extauth_remote_user'];
-    $remote_user = $App->Request->server->get($remote_user_attr);
-    if (isset($remote_user)) {
-        $Teams = new Teams($App->Users);
-
-        $firstname_attr = $App->Config->configArr['extauth_firstname'];
-        $lastname_attr = $App->Config->configArr['extauth_lastname'];
-        $email_attr = $App->Config->configArr['extauth_email'];
-        $teams_attr = $App->Config->configArr['extauth_teams'];
-
-        $firstname = $App->Request->server->get($firstname_attr);
-        $lastname = $App->Request->server->get($lastname_attr);
-        $email = $App->Request->server->get($email_attr);
-        $teams = array($App->Request->server->get($teams_attr));
-        // Use default team is none is provided
-        if (sizeof($Teams->validateTeams($teams)) == 0) {
-            $teams = array('1');
-        }
-
-        /*
-         * Unused password, but $App->Users->create() insists
-         * on it being at least 8 chars long.
-         */
-        $pwd = '********';
-
-        if (($userid = $Auth->getUseridFromEmail($email)) == 0) {
-            $App->Users->create($email, $teams, $firstname, $lastname, $pwd);
-            $App->Log->info('New user '.$email.' autocreated');
-            $userid = $Auth->getUseridFromEmail($email);
-        }
-        $Session->set('email', $email);
-        $Auth->login($userid);
-    }
-
-    $BannedUsers = new BannedUsers($App->Config);
-
     // if we are not in https, die saying we work only in https
     if (!$Request->isSecure() && !$Request->server->has('HTTP_X_FORWARDED_PROTO')) {
         // get the url to display a link to click (without the port)
@@ -87,18 +47,44 @@ try {
     }
 
     // disable login if too much failed_attempts
-    if ($Session->has('failed_attempt') && $Session->get('failed_attempt') >= $App->Config->configArr['login_tries']) {
-        // get user info
-        $fingerprint = md5($_SERVER['REMOTE_ADDR'] . $_SERVER['HTTP_USER_AGENT']);
+    $BannedUsers = new BannedUsers($App->Config);
+    // get user info
+    $fingerprint = md5($App->Request->server->get('REMOTE_ADDR') . $App->Request->server->get('HTTP_USER_AGENT') ?? '');
+    if ($App->Session->has('failed_attempt') && $App->Session->get('failed_attempt') >= $App->Config->configArr['login_tries']) {
         // add the user to the banned list
         $BannedUsers->create($fingerprint);
 
-        $Session->remove('failed_attempt');
+        $App->Session->remove('failed_attempt');
     }
 
     // Check if we are banned after too much failed login attempts
-    if (\in_array(md5($_SERVER['REMOTE_ADDR'] . $_SERVER['HTTP_USER_AGENT']), $BannedUsers->readAll(), true)) {
+    if (in_array($fingerprint, $BannedUsers->readAll(), true)) {
         throw new ImproperActionException(_('You cannot login now because of too many failed login attempts.'));
+    }
+
+    // Show MFA if necessary
+    if ($App->Session->has('mfa_auth_required')) {
+        $App->pageTitle = _('Two Factor Authentication');
+        $template = 'mfa.html';
+        $renderArr = array('hideTitle' => true);
+
+        // If one enables 2FA we need to provide the secret.
+        // For user convenience it is provide as QR code and as plain text.
+        if ($App->Session->has('enable_mfa')) {
+            $MfaHelper = new MfaHelper((int) $App->Users->userData['userid'], $App->Session->get('mfa_secret'));
+            $renderArr['mfaQRCodeImageDataUri'] = $MfaHelper->getQRCodeImageAsDataUri($App->Users->userData['email']);
+            $renderArr['mfaSecret'] = implode(' ', str_split($App->Session->get('mfa_secret'), 4));
+        }
+        $Response->setContent($App->render($template, $renderArr));
+        $Response->send();
+        exit;
+    }
+
+    // Check if already logged in
+    if ($App->Session->has('is_auth')) {
+        $Response = new RedirectResponse('experiments.php');
+        $Response->send();
+        exit;
     }
 
     // don't show the local login form if it's disabled
@@ -117,7 +103,6 @@ try {
     $template = 'login.html';
     $renderArr = array(
         'BannedUsers' => $BannedUsers,
-        'Session' => $Session,
         'idpsArr' => $idpsArr,
         'teamsArr' => $teamsArr,
         'showLocal' => $showLocal,

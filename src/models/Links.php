@@ -11,25 +11,21 @@ declare(strict_types=1);
 namespace Elabftw\Models;
 
 use Elabftw\Elabftw\Db;
-use Elabftw\Interfaces\CrudInterface;
+use Elabftw\Elabftw\ParamsProcessor;
+use Elabftw\Interfaces\CreatableInterface;
+use Elabftw\Interfaces\DestroyableInterface;
+use Elabftw\Interfaces\ReadableInterface;
 use PDO;
 
 /**
  * All about the experiments links
  */
-class Links implements CrudInterface
+class Links implements CreatableInterface, ReadableInterface, DestroyableInterface
 {
-    /** @var AbstractEntity $Entity instance of Experiments */
-    public $Entity;
+    public AbstractEntity $Entity;
 
-    /** @var Db $Db SQL Database */
-    protected $Db;
+    protected Db $Db;
 
-    /**
-     * Constructor
-     *
-     * @param AbstractEntity $entity
-     */
     public function __construct(AbstractEntity $entity)
     {
         $this->Db = Db::getConnection();
@@ -38,21 +34,19 @@ class Links implements CrudInterface
 
     /**
      * Add a link to an experiment
-     *
-     * @param int $link ID of database item
-     * @return void
      */
-    public function create(int $link): void
+    public function create(ParamsProcessor $params): int
     {
+        $link = $params->id;
         $Database = new Database($this->Entity->Users, $link);
         $Database->canOrExplode('read');
         $this->Entity->canOrExplode('write');
 
         // check if this link doesn't exist already
-        $links = $this->readAll();
+        $links = $this->read();
         foreach ($links as $existingLink) {
             if ((int) $existingLink['itemid'] === $link) {
-                return;
+                return 0;
             }
         }
         // create new link
@@ -61,6 +55,8 @@ class Links implements CrudInterface
         $req->bindParam(':item_id', $this->Entity->id, PDO::PARAM_INT);
         $req->bindParam(':link_id', $link, PDO::PARAM_INT);
         $this->Db->execute($req);
+
+        return $this->Db->lastInsertId();
     }
 
     /**
@@ -68,7 +64,7 @@ class Links implements CrudInterface
      *
      * @return array links of the entity
      */
-    public function readAll(): array
+    public function read(): array
     {
         $sql = 'SELECT items.id AS itemid,
             ' . $this->Entity->type . '_links.id AS linkid,
@@ -96,6 +92,7 @@ class Links implements CrudInterface
      * Get related entities
      *
      * @return array It contains two result arrays (items, experiments).
+     * @phan-suppress PhanPluginPrintfVariableFormatString
      */
     public function readRelated(): array
     {
@@ -160,40 +157,11 @@ class Links implements CrudInterface
     }
 
     /**
-     * Get links from an id
-     *
-     * @param int $id
-     * @return array
-     */
-    public function readFromId(int $id): array
-    {
-        $sql = 'SELECT items.id AS itemid,
-            ' . $this->Entity->type . '_links.id AS linkid,
-            items.title,
-            items_types.name,
-            items_types.color
-            FROM ' . $this->Entity->type . '_links
-            LEFT JOIN items ON (' . $this->Entity->type . '_links.link_id = items.id)
-            LEFT JOIN items_types ON (items.category = items_types.id)
-            WHERE ' . $this->Entity->type . '_links.item_id = :id';
-        $req = $this->Db->prepare($sql);
-        $req->bindParam(':id', $id, PDO::PARAM_INT);
-        $this->Db->execute($req);
-
-        $res = $req->fetchAll();
-        if ($res === false) {
-            return array();
-        }
-        return $res;
-    }
-
-    /**
      * Copy the links from one entity to an other
      *
      * @param int $id The id of the original entity
      * @param int $newId The id of the new entity that will receive the links
      * @param bool $fromTpl do we duplicate from template?
-     * @return void
      */
     public function duplicate(int $id, int $newId, $fromTpl = false): void
     {
@@ -216,19 +184,12 @@ class Links implements CrudInterface
         }
     }
 
-    /**
-     * Delete a link
-     *
-     * @param int $id ID of our link
-     * @return void
-     */
-    public function destroy(int $id): void
+    public function destroy(int $id): bool
     {
         $this->Entity->canOrExplode('write');
-
         $sql = 'DELETE FROM ' . $this->Entity->type . '_links WHERE id= :id';
         $req = $this->Db->prepare($sql);
         $req->bindParam(':id', $id, PDO::PARAM_INT);
-        $this->Db->execute($req);
+        return $this->Db->execute($req);
     }
 }

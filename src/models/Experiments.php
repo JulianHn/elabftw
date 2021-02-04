@@ -10,22 +10,21 @@ declare(strict_types=1);
 
 namespace Elabftw\Models;
 
+use function bin2hex;
+use Elabftw\Elabftw\ParamsProcessor;
 use Elabftw\Exceptions\IllegalActionException;
-use Elabftw\Interfaces\CreateInterface;
+use Elabftw\Interfaces\CreatableInterface;
+use Elabftw\Maps\Team;
 use Elabftw\Services\Filter;
 use PDO;
+use function random_bytes;
+use function sha1;
 
 /**
  * All about the experiments
  */
-class Experiments extends AbstractEntity implements CreateInterface
+class Experiments extends AbstractEntity implements CreatableInterface
 {
-    /**
-     * Constructor
-     *
-     * @param Users $users
-     * @param int|null $id
-     */
     public function __construct(Users $users, ?int $id = null)
     {
         parent::__construct($users, $id);
@@ -33,35 +32,37 @@ class Experiments extends AbstractEntity implements CreateInterface
         $this->type = 'experiments';
     }
 
-    /**
-     * Create an experiment
-     *
-     * @param int $tpl the template on which to base the experiment
-     * @return int the new id of the experiment
-     */
-    public function create(int $tpl): int
+    public function create(ParamsProcessor $params): int
     {
         $Templates = new Templates($this->Users);
 
+        $tpl = $params->id;
         // do we want template ?
         if ($tpl > 0) {
             $Templates->setId($tpl);
             $templatesArr = $Templates->read();
             $title = $templatesArr['name'];
             $body = $templatesArr['body'];
+            $canread = $templatesArr['canread'];
+            $canwrite = $templatesArr['canwrite'];
         } else {
             $title = _('Untitled');
             $body = $Templates->readCommonBody();
+            $canread = 'team';
+            $canwrite = 'user';
+            if ($this->Users->userData['default_read'] !== null) {
+                $canread = $this->Users->userData['default_read'];
+            }
+            if ($this->Users->userData['default_write'] !== null) {
+                $canwrite = $this->Users->userData['default_write'];
+            }
         }
 
-        $canread = 'team';
-        $canwrite = 'user';
-        if ($this->Users->userData['default_read'] !== null) {
-            $canread = $this->Users->userData['default_read'];
-        }
-        if ($this->Users->userData['default_write'] !== null) {
-            $canwrite = $this->Users->userData['default_write'];
-        }
+
+        // enforce the permissions if the admin has set them
+        $Team = new Team((int) $this->Users->userData['team']);
+        $canread = $Team->getDoForceCanread() === 1 ? $Team->getForceCanread() : $canread;
+        $canwrite = $Team->getDoForceCanwrite() === 1 ? $Team->getForceCanwrite() : $canwrite;
 
         // SQL for create experiments
         $sql = 'INSERT INTO experiments(title, date, body, category, elabid, canread, canwrite, datetime, userid)
@@ -90,30 +91,6 @@ class Experiments extends AbstractEntity implements CreateInterface
         return $newId;
     }
 
-    /**
-     * Read all experiments related to a DB item
-     *
-     * @param int $itemId the DB item
-     * @return array
-     */
-    public function readRelated(int $itemId): array
-    {
-        $itemsArr = array();
-
-        // get the id of related experiments
-        $sql = 'SELECT item_id FROM experiments_links
-            WHERE link_id = :link_id';
-        $req = $this->Db->prepare($sql);
-        $req->bindParam(':link_id', $itemId, PDO::PARAM_INT);
-        $this->Db->execute($req);
-        while ($data = $req->fetch()) {
-            $this->setId((int) $data['item_id']);
-            $itemsArr[] = $this->read();
-        }
-
-        return $itemsArr;
-    }
-
     public function getBoundEvents(): array
     {
         $sql = 'SELECT team_events.* from team_events WHERE experiment = :id';
@@ -129,8 +106,6 @@ class Experiments extends AbstractEntity implements CreateInterface
 
     /**
      * Can this experiment be timestamped?
-     *
-     * @return bool
      */
     public function isTimestampable(): bool
     {
@@ -147,7 +122,6 @@ class Experiments extends AbstractEntity implements CreateInterface
      *
      * @param string $responseTime the date of the timestamp
      * @param string $responsefilePath the file path to the timestamp token
-     * @return void
      */
     public function updateTimestamp(string $responseTime, string $responsefilePath): void
     {
@@ -213,8 +187,6 @@ class Experiments extends AbstractEntity implements CreateInterface
     /**
      * Destroy an experiment and all associated data
      * The foreign key constraints will take care of associated tables
-     *
-     * @return void
      */
     public function destroy(): void
     {
@@ -229,17 +201,12 @@ class Experiments extends AbstractEntity implements CreateInterface
         $this->Db->execute($req);
 
         // delete from pinned
-        $this->rmFromPinned();
+        $this->Pins->cleanup();
     }
 
-    /**
-     * Get the team from the elabid
-     *
-     * @param string $elabid
-     * @return int
-     */
     public function getTeamFromElabid(string $elabid): int
     {
+        $elabid = Filter::sanitize($elabid);
         $sql = 'SELECT users2teams.teams_id FROM `experiments`
             CROSS JOIN users2teams ON (users2teams.users_id = experiments.userid)
             WHERE experiments.elabid = :elabid';
@@ -251,8 +218,6 @@ class Experiments extends AbstractEntity implements CreateInterface
 
     /**
      * Count all the experiments owned by a user
-     *
-     * @return int
      */
     public function countAll(): int
     {
@@ -301,6 +266,6 @@ class Experiments extends AbstractEntity implements CreateInterface
     private function generateElabid(): string
     {
         $date = Filter::kdate();
-        return $date . '-' . \sha1(\bin2hex(\random_bytes(16)));
+        return $date . '-' . sha1(bin2hex(random_bytes(16)));
     }
 }

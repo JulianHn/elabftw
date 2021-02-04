@@ -11,12 +11,15 @@ declare(strict_types=1);
 namespace Elabftw\Elabftw;
 
 use Elabftw\Models\Config;
+use function explode;
 use function filter_var;
+use function in_array;
 use InvalidArgumentException;
 use League\CommonMark\CommonMarkConverter;
 use League\CommonMark\Environment;
 use League\CommonMark\Extension\GithubFlavoredMarkdownExtension;
 use function mb_strlen;
+use function pathinfo;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -51,7 +54,7 @@ class Tools
         $crossLink = '';
 
         if ($cross) {
-            $crossLink = "<a href='#' class='close' data-dismiss='alert'>&times</a>";
+            $crossLink = "<a href='#' class='close' data-dismiss='alert'>&times;</a>";
         }
 
         $begin = "<div class='alert alert-" . $alert .
@@ -138,7 +141,7 @@ class Tools
      * Take a 8 digits input and output 2014.08.16
      *
      * @param string $date Input date '20140302'
-     * @param string $s an optionnal param to specify the separator
+     * @param string $s an optional param to specify the separator
      * @throws InvalidArgumentException
      * @return string The formatted string
      */
@@ -159,7 +162,7 @@ class Tools
     public static function getExt(string $filename): string
     {
         // Get file extension
-        $ext = \filter_var(\pathinfo($filename, PATHINFO_EXTENSION), FILTER_SANITIZE_STRING);
+        $ext = filter_var(pathinfo($filename, PATHINFO_EXTENSION), FILTER_SANITIZE_STRING);
         if ($ext !== null && $ext !== '' && $ext !== false) {
             return $ext;
         }
@@ -244,7 +247,7 @@ class Tools
      * Used for debugging only
      *
      * @noRector \Rector\DeadCode\Rector\ClassMethod\RemoveDeadRecursiveClassMethodRector
-     * @param array $arr
+     * @param array<mixed> $arr
      * @return string
      */
     public static function printArr(array $arr): string
@@ -307,13 +310,18 @@ class Tools
      * @param string $andor behavior of the space character
      * @param string $column the column to search into
      * @param string $table on which table to do the search
+     * @param bool $isStrict do we add wildcard characters on each side of the query?
      * @return string
      */
-    public static function getSearchSql(string $query, string $andor = 'and', string $column = '', string $table = ''): string
+    public static function getSearchSql(string $query, string $andor = 'and', string $column = '', string $table = '', bool $isStrict = false): string
     {
         $sql = ' AND ';
+        $wildcard = '%';
+        if ($isStrict) {
+            $wildcard = '';
+        }
         // search character is the separator for and/or
-        $qArr = \explode(' ', $query);
+        $qArr = explode(' ', $query);
         $sql .= '(';
         foreach ($qArr as $key => $value) {
             // add the andor after the first
@@ -330,7 +338,7 @@ class Tools
                 $sql .= "(entity.title LIKE '%$value%' OR entity.date LIKE '%$value%' OR entity.body LIKE '%$value%' $elabidSql)";
             } else {
                 // from search page
-                $sql .= 'entity.' . $column . " LIKE '%$value%'";
+                $sql .= 'entity.' . $column . " LIKE '" . $wildcard . $value . $wildcard . "'";
             }
         }
         return $sql . ')';
@@ -346,7 +354,7 @@ class Tools
     {
         $limits = array(10, 20, 50, 100);
         // if the current limit is already a standard one, no need to include it
-        if (\in_array($input, $limits, true)) {
+        if (in_array($input, $limits, true)) {
             return $limits;
         }
         // now find the place where to include our limit
@@ -364,7 +372,7 @@ class Tools
     /**
      * Transform a query object in a query string
      *
-     * @param array $query the query array given by Request
+     * @param array<string, mixed> $query the query array given by Request
      * @return string
      */
     public static function qFilter(array $query): string

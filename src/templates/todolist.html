@@ -1,24 +1,18 @@
 <div id='todoList'>
-  <i class='fas fa-times fa-2x clickable align_right todoToggle' title="{{ 'Close'|trans }}"></i>
+  <i class='fas fa-times fa-2x clickable align-right todoToggle' title="{{ 'Close'|trans }}"></i>
   <h2>{{ 'Todolist'|trans }}</h2>
   <form id="todo-form">
       <input id="todo" type="text" />
       <input type="submit" class='button btn btn-primary' value="{{ 'Add'|trans }}">
   </form>
-  <div id='todoItems-container'>
-  <ul id='todoItems-list' class='sortable' data-axis='y' data-table='todolist'>
-    {% for todoItem in App.todoItems %}
-      <li id='todoItem_{{ todoItem.id }}'>
-        <i class='fas fa-trash-alt clickable align_right destroyTodoItem' data-id='{{ todoItem.id }}'></i>
-        <span style='font-size:90%;display:block;'><i class='fas fa-sort sortableHandle'></i> <span class='relative-moment' title='{{ todoItem.creation_time }}'></span></span>
-        <span class='todoItem editable' data-id='{{ todoItem.id }}'>{{ todoItem.body }}</span>
-      </li>
-    {% endfor %}
-  </ul>
-  {% if App.todoItems %}
-  <a href="#" class='button btn btn-danger todoDestroyAll'>{{ 'Clear all'|trans }}</a>
-  {% endif %}
-  </div>
+
+  <!-- this div will be filled with the list of todo items by js -->
+  <div id='todoItemsDiv'></div>
+
+  <hr>
+  <h2>{{ 'Unfinished steps'|trans }}</h2>
+  <div id='todoStepsDiv'></div>
 </div>
+
 
 <div id='todoSc' data-toggle='{{ App.Users.userData.sc_todo }}'></div>

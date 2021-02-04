@@ -22,23 +22,19 @@ use Symfony\Component\HttpFoundation\Request;
  */
 class Permissions
 {
-    /** @var Users $Users instance of Users */
-    private $Users;
+    private Users $Users;
 
-    /** @var Teams $Teams instance of Teams */
-    private $Teams;
+    private Teams $Teams;
 
-    /** @var TeamGroups $TeamsGroups instance of TeamsGroups */
-    private $TeamGroups;
+    private TeamGroups $TeamGroups;
 
-    /** @var array $item the item to check */
-    private $item;
+    private array $item;
 
     /**
      * Constructor
      *
      * @param Users $users
-     * @param array $item
+     * @param array<string, mixed> $item
      */
     public function __construct(Users $users, array $item)
     {
@@ -50,15 +46,13 @@ class Permissions
 
     /**
      * Get permissions for an experiment/item
-     *
-     * @return array
      */
     public function forExpItem(): array
     {
         $write = $this->getWrite();
 
         // if we have write access, then we have read access for sure
-        if ($write === true) {
+        if ($write) {
             return array('read' => true, 'write' => $write);
         }
 
@@ -104,8 +98,6 @@ class Permissions
 
     /**
      * Get permissions for a template
-     *
-     * @return array
      */
     public function forTemplates(): array
     {
@@ -153,8 +145,6 @@ class Permissions
 
     /**
      * Get the write permission for an exp/item
-     *
-     * @return bool
      */
     private function getWrite(): bool
     {

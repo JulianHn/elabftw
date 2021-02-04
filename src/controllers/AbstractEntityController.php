@@ -11,6 +11,8 @@ declare(strict_types=1);
 namespace Elabftw\Controllers;
 
 use Elabftw\Elabftw\App;
+use Elabftw\Elabftw\DisplayParams;
+use Elabftw\Elabftw\ParamsProcessor;
 use Elabftw\Elabftw\Tools;
 use Elabftw\Exceptions\ImproperActionException;
 use Elabftw\Interfaces\ControllerInterface;
@@ -27,24 +29,15 @@ use Symfony\Component\HttpFoundation\Response;
  */
 abstract class AbstractEntityController implements ControllerInterface
 {
-    /** @var App $App instance of App */
-    protected $App;
+    protected App $App;
 
-    /** @var AbstractEntity $Entity instance of AbstractEntity */
+    /** @var AbstractEntity $Entity */
     protected $Entity;
 
-    /** @var Templates $Templates instance of Templates */
-    protected $Templates;
+    protected Templates $Templates;
 
-    /** @var array $categoryArr array of category (status or item type) */
-    protected $categoryArr = array();
+    protected array $categoryArr = array();
 
-    /**
-     * Constructor
-     *
-     * @param App $app
-     * @param AbstractEntity $entity
-     */
     public function __construct(App $app, AbstractEntity $entity)
     {
         $this->App = $app;
@@ -54,8 +47,6 @@ abstract class AbstractEntityController implements ControllerInterface
 
     /**
      * Get the Response object from the Request
-     *
-     * @return Response
      */
     public function getResponse(): Response
     {
@@ -70,8 +61,9 @@ abstract class AbstractEntityController implements ControllerInterface
         }
 
         // CREATE
-        if ($this->App->Request->query->has('create')) {
-            $id = $this->Entity->create((int) $this->App->Request->query->get('tpl'));
+        if ($this->App->Request->query->has('create') && !$this->App->Session->get('is_anon')) {
+            $params = new ParamsProcessor(array('id' => $this->App->Request->query->get('tpl')));
+            $id = $this->Entity->create($params);
             return new RedirectResponse('?mode=edit&id=' . (string) $id);
         }
 
@@ -80,122 +72,55 @@ abstract class AbstractEntityController implements ControllerInterface
     }
 
     /**
-     * Get the items
-     *
-     * @return array
-     */
-    abstract protected function getItemsArr(string $searchType): array;
-
-    /**
      * Show mode (several items displayed). Default view.
-     *
-     * @return Response
      */
-    protected function show(): Response
+    public function show(bool $isSearchPage = false): Response
     {
-        // if this variable is not empty the error message shown will be different if there are no results
-        $searchType = '';
-        $query = '';
-
         // VISIBILITY LIST
         $TeamGroups = new TeamGroups($this->Entity->Users);
 
         // CATEGORY FILTER
         if (Check::id((int) $this->App->Request->query->get('cat')) !== false) {
             $this->Entity->addFilter('categoryt.id', $this->App->Request->query->get('cat'));
-            $searchType = 'category';
         }
+
         // TAG FILTER
         if (!empty($this->App->Request->query->get('tags')[0])) {
             // get all the ids with that tag
-            $ids = $this->Entity->Tags->getIdFromTags($this->App->Request->query->get('tags'), (int) $this->App->Users->userData['team']);
+            $tagsFromGet = $this->App->Request->query->get('tags') ?? array();
+            if (is_string($tagsFromGet)) {
+                $tagsFromGet = array();
+            }
+            $ids = $this->Entity->Tags->getIdFromTags($tagsFromGet, (int) $this->App->Users->userData['team']);
             $idFilter = ' AND (';
             foreach ($ids as $id) {
                 $idFilter .= 'entity.id = ' . $id . ' OR ';
             }
             $trimmedFilter = rtrim($idFilter, ' OR ') . ')';
+            // don't add it if it's empty (for instance we search in items for a tag that only exists on experiments)
+            if ($trimmedFilter === ' AND ()') {
+                throw new ImproperActionException(_("Sorry. I couldn't find anything :("));
+            }
             $this->Entity->idFilter = $trimmedFilter;
-            $searchType = 'tag';
-        }
-        // QUERY FILTER
-        if (!empty($this->App->Request->query->get('q'))) {
-            $query = $this->App->Request->query->filter('q', null, FILTER_SANITIZE_STRING);
-            $this->Entity->queryFilter = Tools::getSearchSql($query, 'and', '', $this->Entity->type);
-            $searchType = 'query';
         }
 
-        // RELATED FILTER
-        if (Check::id((int) $this->App->Request->query->get('related')) !== false) {
-            $searchType = 'related';
-        }
-
-        // ORDER
-        $order = '';
-
-        // load the pref from the user
-        if (isset($this->Entity->Users->userData['orderby'])) {
-            $order = $this->Entity->Users->userData['orderby'];
-        }
-
-        // now get pref from the filter-order-sort menu
-        if ($this->App->Request->query->has('order') && !empty($this->App->Request->query->get('order'))) {
-            $order = $this->App->Request->query->get('order');
-        }
-
-        if ($order === 'cat') {
-            $this->Entity->order = 'categoryt.id';
-        } elseif ($order === 'date' || $order === 'rating' || $order === 'title' || $order === 'id' || $order === 'lastchange') {
-            $this->Entity->order = 'entity.' . $order;
-        } elseif ($order === 'comment') {
-            $this->Entity->order = 'commentst.recent_comment';
-        } elseif ($order === 'user') {
-            $this->Entity->order = 'entity.userid';
-        }
-
-        // SORT
-        $sort = '';
-
-        // load the pref from the user
-        if (isset($this->Entity->Users->userData['sort'])) {
-            $sort = $this->Entity->Users->userData['sort'];
-        }
-
-        // now get pref from the filter-order-sort menu
-        if ($this->App->Request->query->has('sort') && !empty($this->App->Request->query->get('sort'))) {
-            $sort = $this->App->Request->query->get('sort');
-        }
-
-        if ($sort === 'asc' || $sort === 'desc') {
-            $this->Entity->sort = $sort;
-        }
-
-        // PAGINATION
-        $limit = (int) ($this->App->Users->userData['limit_nb'] ?? 15);
-        if ($this->App->Request->query->has('limit')) {
-            $limit = Check::limit((int) $this->App->Request->query->get('limit'));
-        }
-
-        $offset = 0;
-        if ($this->App->Request->query->has('offset') && Check::id((int) $this->App->Request->query->get('offset')) !== false) {
-            $offset = (int) $this->App->Request->query->get('offset');
-        }
-
-        $this->Entity->setOffset($offset);
-        $this->Entity->setLimit($limit);
-        // END PAGINATION
-
+        // create the DisplayParams object from the query
+        $DisplayParams = new DisplayParams();
+        $DisplayParams->adjust($this->App);
 
         // only show public to anon
-        if ($this->App->Session->get('anon')) {
+        if ($this->App->Session->get('is_anon')) {
             $this->Entity->addFilter('entity.canread', 'public');
         }
 
-        $itemsArr = $this->getItemsArr($searchType);
+        $itemsArr = $this->getItemsArr();
         // get tags separately
         $tagsArr = array();
         if (!empty($itemsArr)) {
             $tagsArr = $this->Entity->getTags($itemsArr);
         }
+        // get all the tags for the top search bar
+        $tagsArrForSelect = $this->Entity->Tags->readAll();
 
         // store the query parameters in the Session
         $this->App->Session->set('lastquery', $this->App->Request->query->all());
@@ -203,16 +128,17 @@ abstract class AbstractEntityController implements ControllerInterface
         $template = 'show.html';
 
         $renderArr = array(
+            'DisplayParams' => $DisplayParams,
             'Entity' => $this->Entity,
             'categoryArr' => $this->categoryArr,
-            'pinnedArr' => $this->Entity->getPinned(),
+            'pinnedArr' => $this->Entity->Pins->getPinned(),
             'itemsArr' => $itemsArr,
-            'limit' => $limit,
-            'offset' => $offset,
-            'query' => $query,
-            'searchType' => $searchType,
+            // generate light show page
+            'searchPage' => $isSearchPage,
+            'searchType' => $isSearchPage ? 'something' : $DisplayParams->searchType,
             'tagsArr' => $tagsArr,
-            'templatesArr' => $this->Templates->readInclusive(),
+            'tagsArrForSelect' => $tagsArrForSelect,
+            'templatesArr' => $this->Templates->readForUser(),
             'visibilityArr' => $TeamGroups->getVisibilityList(),
         );
         $Response = new Response();
@@ -223,9 +149,12 @@ abstract class AbstractEntityController implements ControllerInterface
     }
 
     /**
+     * Get the items
+     */
+    abstract protected function getItemsArr(): array;
+
+    /**
      * View mode (one item displayed)
-     *
-     * @return Response
      */
     protected function view(): Response
     {
@@ -241,13 +170,14 @@ abstract class AbstractEntityController implements ControllerInterface
         $renderArr = array(
             'Entity' => $this->Entity,
             'categoryArr' => $this->categoryArr,
-            'commentsArr' => $this->Entity->Comments->readAll(),
-            'linksArr' => $this->Entity->Links->readAll(),
+            'commentsArr' => $this->Entity->Comments->read(),
+            'linksArr' => $this->Entity->Links->read(),
             'mode' => 'view',
             'revNum' => $Revisions->readCount(),
-            'stepsArr' => $this->Entity->Steps->readAll(),
-            'templatesArr' => $this->Templates->readAll(),
+            'stepsArr' => $this->Entity->Steps->read(),
+            'templatesArr' => $this->Templates->readForUser(),
             'timestampInfo' => $this->Entity->getTimestampInfo(),
+            'uploadsArr' => $this->Entity->Uploads->readAll(),
         );
 
         // RELATED ITEMS AND EXPERIMENTS
@@ -266,8 +196,6 @@ abstract class AbstractEntityController implements ControllerInterface
 
     /**
      * Edit mode
-     *
-     * @return Response
      */
     protected function edit(): Response
     {
@@ -291,12 +219,13 @@ abstract class AbstractEntityController implements ControllerInterface
             'Entity' => $this->Entity,
             'categoryArr' => $this->categoryArr,
             'lang' => Tools::getCalendarLang($this->App->Users->userData['lang'] ?? 'en_GB'),
-            'linksArr' => $this->Entity->Links->readAll(),
+            'linksArr' => $this->Entity->Links->read(),
             'maxUploadSize' => Tools::getMaxUploadSize(),
             'mode' => 'edit',
             'revNum' => $Revisions->readCount(),
-            'stepsArr' => $this->Entity->Steps->readAll(),
-            'templatesArr' => $this->Templates->readAll(),
+            'stepsArr' => $this->Entity->Steps->read(),
+            'templatesArr' => $this->Templates->readForUser(),
+            'uploadsArr' => $this->Entity->Uploads->readAll(),
             'visibilityArr' => $TeamGroups->getVisibilityList(),
         );
 

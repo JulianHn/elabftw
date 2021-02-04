@@ -14,27 +14,19 @@ namespace Elabftw\Elabftw;
 
 use Elabftw\Models\Config;
 use Elabftw\Models\Idps;
+use function rtrim;
 
 /**
  * Saml settings
  */
 class Saml
 {
-    /** @var Config $Config instance of Config */
-    public $Config;
+    public Config $Config;
 
-    /** @var Idps $Idps instance of Idps */
-    private $Idps;
+    private Idps $Idps;
 
-    /** @var array $settings the saml settings array */
-    private $settings = array();
+    private array $settings = array();
 
-    /**
-     * Constructor
-     *
-     * @param Config $config
-     * @param Idps $idps
-     */
     public function __construct(Config $config, Idps $idps)
     {
         $this->Config = $config;
@@ -44,23 +36,24 @@ class Saml
     /**
      * Get the settings array
      *
-     * @return array
+     * @param int|null $id id of the selected idp
      */
-    public function getSettings(): array
+    public function getSettings(?int $id = null): array
     {
-        $this->setSettings();
+        $this->setSettings($id);
         return $this->settings;
     }
 
     /**
      * Set the settings array to $this->settings
-     * If the $id is null, the idp part of the settings will be empty
-     * but it's ok because we don't always need it
+     * On login we don't have an id but we don't need the settings
+     * from a particular idp (just the service provider)
      *
+     * @param int|null $id id of the idp we want
      */
-    private function setSettings(): void
+    private function setSettings(?int $id = null): void
     {
-        $idpsArr = $this->Idps->getActive();
+        $idpsArr = $this->Idps->getActive($id);
 
         $this->settings = array(
             // If 'strict' is True, then the PHP Toolkit will reject unsigned
@@ -86,7 +79,7 @@ class Saml
                 // returned to the requester, in this case our SP.
                 'assertionConsumerService' => array(
                     // URL Location where the <Response> from the IdP will be returned
-                    'url' => $this->Config->configArr['saml_acs_url'],
+                    'url' => rtrim($this->Config->configArr['saml_baseurl'] ?? '', '/') . '/index.php?acs',
                     // SAML protocol binding to be used when returning the <Response>
                     // message.  Onelogin Toolkit supports for this endpoint the
                     // HTTP-Redirect binding only
@@ -112,7 +105,7 @@ class Saml
                 // returned to the requester, in this case our SP.
                 'singleLogoutService' => array(
                     // URL Location where the <Response> from the IdP will be returned
-                    'url' => $this->Config->configArr['saml_slo_url'],
+                    'url' => $this->Config->configArr['saml_baseurl'] . '/app/logout.php?sls',
                     // SAML protocol binding to be used when returning the <Response>
                     // message.  Onelogin Toolkit supports for this endpoint the
                     // HTTP-Redirect binding only

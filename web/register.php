@@ -1,4 +1,4 @@
-<?php declare(strict_types=1);
+<?php
 /**
  * register.php
  *
@@ -8,6 +8,7 @@
  * @license AGPL-3.0
  * @package elabftw
  */
+declare(strict_types=1);
 
 namespace Elabftw\Elabftw;
 
@@ -30,7 +31,7 @@ $template = 'error.html';
 $renderArr = array();
 try {
     // Check if we're logged in
-    if ($Session->has('auth') || $Session->has('anon')) {
+    if ($App->Session->has('is_auth')) {
         throw new ImproperActionException(sprintf(
             _('Please %slogout%s before you register another account.'),
             "<a style='alert-link' href='app/logout.php'>",
@@ -43,8 +44,7 @@ try {
         throw new ImproperActionException(_('No local account creation is allowed!'));
     }
 
-    $Teams = new Teams($App->Users);
-    $teamsArr = $Teams->readAll();
+    $teamsArr = (new Teams($App->Users))->readAll();
 
     $template = 'register.html';
     $renderArr = array(

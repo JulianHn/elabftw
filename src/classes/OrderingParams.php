@@ -16,20 +16,14 @@ namespace Elabftw\Elabftw;
  */
 class OrderingParams
 {
-    /** @var string $table */
-    private $table;
+    private string $table;
 
-    /** @var array $ordering */
-    private $ordering;
+    private array $ordering;
 
     public function __construct(string $table, array $ordering)
     {
         $this->table = $table;
         $this->ordering = $ordering;
-        // remove the 'Create new' for templates
-        if ($table === 'experiments_templates') {
-            unset($this->ordering[0]);
-        }
     }
 
     public function getTable(): string

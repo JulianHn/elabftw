@@ -25,15 +25,13 @@ use PDO;
  */
 class Config
 {
-    /** @var array $configArr the array with all config */
-    public $configArr;
+    // the array with all config
+    public array $configArr = array();
 
-    /** @var Db $Db SQL Database */
-    protected $Db;
+    protected Db $Db;
 
     /**
      * Get Db and load the configArr
-     *
      */
     public function __construct()
     {
@@ -48,8 +46,6 @@ class Config
 
     /**
      * Read the configuration values
-     *
-     * @return array
      */
     public function read(): array
     {
@@ -71,7 +67,7 @@ class Config
     /**
      * Used in sysconfig.php to update config values
      *
-     * @param array $post (conf_name => conf_value)
+     * @param array<string, mixed> $post (conf_name => conf_value)
      * @throws \Defuse\Crypto\Exception\EnvironmentIsBrokenException
      * @return void
      */
@@ -97,6 +93,9 @@ class Config
         if (isset($post['url']) && !empty($post['url'])) {
             $post['url'] = filter_var($post['url'], FILTER_SANITIZE_URL);
         }
+        if (isset($post['url']) && $post['url'] === '') {
+            $post['url'] = null;
+        }
 
         if (isset($post['login_tries']) && Check::id((int) $post['login_tries']) === false) {
             throw new IllegalActionException('Bad value for number of login attempts!');
@@ -105,11 +104,18 @@ class Config
             throw new IllegalActionException('Bad value for number of login attempts!');
         }
 
-        // encrypt password
+        // encrypt SMTP password
         if (isset($post['smtp_password']) && !empty($post['smtp_password'])) {
             $post['smtp_password'] = Crypto::encrypt($post['smtp_password'], Key::loadFromAsciiSafeString(\SECRET_KEY));
         } elseif (isset($post['smtp_password'])) {
             unset($post['smtp_password']);
+        }
+
+        // encrypt LDAP password
+        if (isset($post['ldap_password']) && !empty($post['ldap_password'])) {
+            $post['ldap_password'] = Crypto::encrypt($post['ldap_password'], Key::loadFromAsciiSafeString(\SECRET_KEY));
+        } elseif (isset($post['ldap_password'])) {
+            unset($post['ldap_password']);
         }
 
         // loop the array and update config
@@ -124,8 +130,6 @@ class Config
 
     /**
      * Reset the timestamp password
-     *
-     * @return void
      */
     public function destroyStamppass(): void
     {
@@ -136,8 +140,6 @@ class Config
 
     /**
      * Restore default values
-     *
-     * @return void
      */
     public function restoreDefaults(): void
     {
@@ -148,9 +150,8 @@ class Config
     }
 
     /**
-     * Insert the default values in config
-     *
-     * @return void
+     * Insert the default values in the sql config table
+     * Only run once of first ever page load
      */
     private function populate(): void
     {
@@ -161,6 +162,7 @@ class Config
             ('admin_validate', '1'),
             ('ban_time', '60'),
             ('debug', '0'),
+            ('devmode', '0'),
             ('lang', 'en_GB'),
             ('login_tries', '3'),
             ('mail_from', 'notconfigured@example.com'),
@@ -168,9 +170,9 @@ class Config
             ('proxy', ''),
             ('sendmail_path', '/usr/sbin/sendmail'),
             ('smtp_address', 'mail.smtp2go.com'),
-            ('smtp_encryption', 'tls'),
+            ('smtp_encryption', 'ssl'),
             ('smtp_password', ''),
-            ('smtp_port', '2525'),
+            ('smtp_port', '587'),
             ('smtp_username', ''),
             ('stamplogin', ''),
             ('stamppass', ''),
@@ -183,9 +185,7 @@ class Config
             ('saml_strict', '1'),
             ('saml_baseurl', NULL),
             ('saml_entityid', NULL),
-            ('saml_acs_url', NULL),
             ('saml_acs_binding', NULL),
-            ('saml_slo_url', NULL),
             ('saml_slo_binding', NULL),
             ('saml_nameidformat', NULL),
             ('saml_x509', NULL),
@@ -226,7 +226,20 @@ class Config
             ('extauth_firstname', ''),
             ('extauth_lastname', ''),
             ('extauth_email', ''),
-            ('extauth_teams', '');";
+            ('extauth_teams', ''),
+            ('logout_url', ''),
+            ('ldap_toggle', '0'),
+            ('ldap_host', ''),
+            ('ldap_port', '389'),
+            ('ldap_base_dn', ''),
+            ('ldap_username', NULL),
+            ('ldap_password', NULL),
+            ('ldap_uid_cn', 'cn'),
+            ('ldap_email', 'mail'),
+            ('ldap_lastname', 'cn'),
+            ('ldap_firstname', 'givenname'),
+            ('ldap_team', 'on'),
+            ('ldap_use_tls', '0')";
 
         $req = $this->Db->prepare($sql);
         $req->bindParam(':schema', $schema);
