@@ -9,6 +9,7 @@
 
 namespace Elabftw\Services;
 
+use Elabftw\Elabftw\ParamsProcessor;
 use Elabftw\Models\AbstractEntity;
 use Elabftw\Models\Experiments;
 use Elabftw\Models\ItemsTypes;
@@ -27,7 +28,7 @@ class Populate
      * @param int $iter number of items to add
      * @return void
      */
-    public function generate(AbstractEntity $Entity, int $iter = 100): void
+    public function generate(AbstractEntity $Entity, int $iter = 50): void
     {
         $Faker = \Faker\Factory::create();
         if ($Entity instanceof Experiments) {
@@ -35,19 +36,19 @@ class Populate
             $tpl = 0;
         } else {
             $Category = new ItemsTypes($Entity->Users);
-            $tpl = 1;
+            $tpl = (int) $Category->readAll()[0]['category_id'];
         }
         $categories = $Category->readAll();
 
 
         printf("Generating %s \n", $Entity->type);
         for ($i = 0; $i <= $iter; $i++) {
-            $id = $Entity->create($tpl);
+            $id = $Entity->create(new ParamsProcessor(array('id' => $tpl)));
             $Entity->setId($id);
             // variable tag number
             $Tags = new Tags($Entity);
             for ($j = 0; $j <= $Faker->numberBetween(0, 5); $j++) {
-                $Tags->create($Faker->word);
+                $Tags->create(new ParamsProcessor(array('tag' => $Faker->word)));
             }
             // random date in the past 5 years
             $Entity->update($Faker->sentence, $Faker->dateTimeBetween('-5 years')->format('Ymd'), $Faker->realText(1000));
@@ -66,6 +67,17 @@ class Populate
             // change the category (status/item type)
             $category = $Faker->randomElement($categories);
             $Entity->updateCategory((int) $category['category_id']);
+
+            // maybe upload a file but not on the first one
+            if ($Faker->randomDigit > 7 && $id !== 1) {
+                $Entity->Uploads->createFromString('json', $Faker->word, '{ "some": "content" }');
+            }
+
+            // maybe add a few steps
+            if ($Faker->randomDigit > 8) {
+                $Entity->Steps->create(new ParamsProcessor(array('template' => $Faker->word)));
+                $Entity->Steps->create(new ParamsProcessor(array('template' => $Faker->word)));
+            }
         }
         printf("Generated %d %s \n", $iter, $Entity->type);
     }

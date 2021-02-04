@@ -11,6 +11,7 @@ declare(strict_types=1);
 namespace Elabftw\Controllers;
 
 use Elabftw\Elabftw\App;
+use Elabftw\Elabftw\DisplayParams;
 use Elabftw\Models\Database;
 use Elabftw\Models\ItemsTypes;
 
@@ -35,12 +36,11 @@ class DatabaseController extends AbstractEntityController
 
     /**
      * Get the results from main sql query with items to display
-     *
-     * @param string $searchType
-     * @return array
      */
-    protected function getItemsArr(string $searchType): array
+    protected function getItemsArr(): array
     {
-        return $this->Entity->readShow();
+        $DisplayParams = new DisplayParams();
+        $DisplayParams->adjust($this->App);
+        return $this->Entity->readShow($DisplayParams);
     }
 }

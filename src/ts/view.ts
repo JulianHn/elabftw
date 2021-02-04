@@ -10,8 +10,12 @@ import { notif } from './misc';
 // not working
 //import { key } from '../js/vendor/keymaster.js';
 declare let key: any;
+const moment = require('moment'); // eslint-disable-line @typescript-eslint/no-var-requires
 
 $(document).ready(function() {
+  if ($('#info').data('page') !== 'view') {
+    return;
+  }
   // add the title in the page name (see #324)
   document.title = $('.title_view').text() + ' - eLabFTW';
 
@@ -24,7 +28,7 @@ $(document).ready(function() {
   });
 
   // TOGGLE LOCK
-  $('#lock').on('click', function() {
+  $(document).on('click', '#lock', function() {
     $.post('app/controllers/EntityAjaxController.php', {
       lock: true,
       type: type,
@@ -44,6 +48,23 @@ $(document).ready(function() {
     window.location.href = '?mode=edit&id=' + id;
   });
 
+  // CLICK SEE EVENTS BUTTON
+  $(document).on('click', '.seeEvents', function() {
+    $.get('app/controllers/EntityAjaxController.php', {
+      getBoundEvents: true,
+      type: type,
+      id: id
+    }).done(function(json) {
+      if (json.res) {
+        let bookings = '';
+        for(let i=0; i < json.msg.length; i++) {
+          bookings = bookings + '<a href="team.php?item=' + json.msg[i].item + '&start=' + encodeURIComponent(json.msg[i].start) + '"><button class="mr-2 btn btn-neutral relative-moment">' + moment(json.msg[i].start).fromNow() + '</button></a>';
+        }
+        $('#boundBookings').html(bookings);
+      }
+    });
+  });
+
   // DECODE ASN1
   $(document).on('click', '.decodeAsn1', function() {
     $.post('app/controllers/ExperimentsAjaxController.php', {
@@ -55,7 +76,7 @@ $(document).ready(function() {
   });
 
   // DUPLICATE
-  $('.duplicateItem').on('click', function() {
+  $(document).on('click', '.duplicateItem', function() {
     $.post('app/controllers/EntityAjaxController.php', {
       duplicate: true,
       id: $(this).data('id'),
@@ -66,7 +87,7 @@ $(document).ready(function() {
   });
 
   // SHARE
-  $('.shareItem').on('click', function() {
+  $(document).on('click', '.shareItem', function() {
     $.post('app/controllers/EntityAjaxController.php', {
       getShareLink: true,
       id: $(this).data('id'),
@@ -89,6 +110,20 @@ $(document).ready(function() {
         $('.modal-body').css('color', 'red');
         $('.modal-body').html(json.msg);
       }
+    });
+  });
+
+  // TOGGLE PINNED
+  $(document).on('click', '#pinIcon', function() {
+    $.post('app/controllers/EntityAjaxController.php', {
+      togglePin: true,
+      type: type,
+      id: id
+    }).done(function(json) {
+      if (json.res) {
+        $('#pinIcon').find('[data-fa-i2svg]').toggleClass('grayed-out');
+      }
+      notif(json);
     });
   });
 });

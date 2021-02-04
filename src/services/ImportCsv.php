@@ -56,6 +56,7 @@ class ImportCsv extends AbstractImport
         $this->checkDelimiter($csv);
         $csv->setDelimiter($this->delimiter);
         $csv->setHeaderOffset(0);
+        $rows = $csv->getRecords();
 
         // SQL for importing
         $sql = 'INSERT INTO items(team, title, date, body, userid, category, canread)
@@ -65,7 +66,7 @@ class ImportCsv extends AbstractImport
         $date = Filter::kdate();
 
         // now loop the rows and do the import
-        foreach ($csv as $row) {
+        foreach ($rows as $row) {
             if (empty($row['title'])) {
                 throw new ImproperActionException('Could not find the title column!');
             }
@@ -88,7 +89,7 @@ class ImportCsv extends AbstractImport
     /**
      * Generate a body from a row. Add column name in bold and content after that.
      *
-     * @param array $row row from the csv
+     * @param array<string, string> $row row from the csv
      * @return string
      */
     private function getBodyFromRow(array $row): string
@@ -98,6 +99,10 @@ class ImportCsv extends AbstractImport
         // deal with the rest of the columns
         $body = '';
         foreach ($row as $subheader => $content) {
+            // translate urls into links
+            if (filter_var($content, FILTER_VALIDATE_URL)) {
+                $content = '<a href="' . $content . '">' . $content . '</a>';
+            }
             $body .= '<p><strong>' . (string) $subheader . ':</strong> ' . $content . '</p>';
         }
 
